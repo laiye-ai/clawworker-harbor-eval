@@ -1,6 +1,21 @@
 # AP 六轮固定投喂
 
-配置：[ap-six-turns.yaml](ap-six-turns.yaml)。原始数据目录为 `E:\Desktop\测试数据\三单匹配20case`，WSL 路径为 `/mnt/e/Desktop/测试数据/三单匹配20case`。
+配置：[ap-six-turns.yaml](ap-six-turns.yaml)。模板 ZIP 和 PDF 由运行者提供，不依赖某台机器的桌面或盘符，也不随仓库发布。
+
+将配置复制到自己的实验目录，并按下面的相对路径放置输入。PDF 分别命名为 `po.pdf`、`delivery.pdf`、`invoice.pdf`；也可以在 YAML 中改为实际文件名。所有输入路径相对于 YAML 文件解析，整个目录可以搬到另一台机器。
+
+```text
+my-experiment/
+├── ap-six-turns.yaml
+├── selected-template.zip
+└── inputs/
+    ├── case01/  po.pdf、delivery.pdf、invoice.pdf
+    ├── case04/  po.pdf、delivery.pdf、invoice.pdf
+    ├── case07/  po.pdf、delivery.pdf、invoice.pdf
+    ├── case06/  po.pdf、delivery.pdf、invoice.pdf
+    ├── case12/  po.pdf、delivery.pdf、invoice.pdf
+    └── case20/  po.pdf、delivery.pdf、invoice.pdf
+```
 
 同一会话顺序发送六轮，每轮仅发送对应源 case 的三份原始 PDF（PO、供货单、发票）。六轮消息完全相同：
 
@@ -10,7 +25,7 @@
 
 ## 选择与核对依据
 
-下表的预期来自数据集的 `答案与来源.md`，不是模型实测结论。本说明和原始答案文件均不作为模型输入。
+下表预期来自原演示数据集的 `答案与来源.md`，不是模型实测结论。本说明和原始答案文件均不作为模型输入。使用自己的单据时，应同步调整预期或评分器；不能直接沿用演示数据的业务结论。
 
 | 轮次 | 源 case | 覆盖点 | 数据集预期 |
 | --- | --- | --- | --- |
@@ -27,22 +42,28 @@
 
 ## 使用前提
 
-- 已选桌面的 AP 1.5.36、`deepseek-flash` 和官方 API；仍可通过通用入口替换模板和模型。密钥使用 `MODEL_API_KEY`、`ADP_API_KEY` 环境变量，配置中不保存密钥。
+- 自行准备模板 ZIP，并通过 YAML 的 `template` 选择；文件名和模板版本不写入脚本。示例使用 `deepseek-flash`，模型和 API 可在配置中替换。密钥使用 `MODEL_API_KEY`、`ADP_API_KEY` 环境变量，配置中不保存密钥。
 - 这份配置只定义六轮匹配消息。AP 初始化、Worker 配置及 ADP 三个应用必须已准备好；全新 Worker 会按模板先进入 onboarding。本配置不注入“已初始化”结论，也不绕过模板校验。
 - 当前不配置自动评分器，结果将标为 `unverified`；可以对照上表及实际 SQLite 记录核对，不能把脚本执行完成等同于业务正确率。
 - 原始 PDF 只读引用，由 Harbor 在任务生成时复制；不修改原文件。YAML 注释、此说明及 `答案与来源.md` 不会随附件发送。
 
-填写配置后，使用原有入口；输出目录必须不存在：
+例如，从 Harbor checkout 创建被 Git 忽略的本地实验目录：
 
 ```sh
-cd /home/admin/workspaces/harbor
-.venv/bin/python -m harbor.agents.clawworker_preview.experiment \
-  --config /home/admin/workspaces/harbor/examples/clawworker-preview/ap-six-turns.yaml \
-  --output /tmp/ap-six-turns-run-01
+mkdir -p ./tmp/ap-six-turns
+cp examples/clawworker-preview/ap-six-turns.yaml ./tmp/ap-six-turns/
+```
+
+将模板与 PDF 放入该目录并填写模型配置后，在已安装本 checkout 的 Python 环境中运行。输出目录必须不存在：
+
+```sh
+python -m harbor.agents.clawworker_preview.experiment \
+  --config ./tmp/ap-six-turns/ap-six-turns.yaml \
+  --output ./tmp/ap-six-turns/run-01
 ```
 
 每轮实际回复、耗时、LLM 请求次数和运行状态见输出中的 `summary.json` → `trials[].turns[]`。
 
 2026-11-10 已在初始化的本地测试镜像中完成一次真实 ADP/DeepSeek 六轮测试：18 份全部入库，3 组匹配通过、2 组正确记录为待人工、1 组供应商冲突被阻断但记成缺单。独立状态与分配核对为 5/6；原始 Harbor verification 仍为未配置评分器，由运行后只读 SQLite 核对产生此结果。
 
-本次运行总输入 3,649,902 token、输出 23,494 token；输入已包含 3,548,160 个缓存命中 token。每轮统计见[实测报告](/tmp/harbor-ap-real-a8dsnsfn/public/report.md)及[CSV](/tmp/harbor-ap-real-a8dsnsfn/public/rounds.csv)。
+该参考运行总输入 3,649,902 token、输出 23,494 token；输入已包含 3,548,160 个缓存命中 token。原始本地日志未随仓库发布。这些数值不是新运行的验收结果；新运行应查看自己输出目录中的 `summary.json` 和逐轮日志。

@@ -10,12 +10,24 @@ matching owner/Worker identities and the workspace namespace expected by the AP
 bootstrap. It also installs the selected package's skills where that bootstrap
 discovers them. It uses local Docker storage, not NFS or a cloud account.
 
-From the Harbor repository, choose the template and build its fixture:
+From the Harbor checkout, create an experiment directory and copy the profile:
+
+```sh
+mkdir -p ./tmp/ap-onboarding
+cp examples/clawworker-preview/ap-onboarding.yaml ./tmp/ap-onboarding/
+```
+
+Put your chosen AP ZIP at `tmp/ap-onboarding/selected-template.zip`, or change
+`template` in the copied YAML to its filename. The ZIP is not bundled with this
+repository. Input paths are relative to the YAML, so the experiment directory
+can be moved to another machine without editing the runner.
+
+Build the fixture from that same selected template:
 
 ```sh
 python -m harbor.agents.clawworker_preview.template_image \
-  --template /absolute/path/to/selected-template.zip \
-  --context /tmp/ap-onboarding-template --tag harbor-onboarding-template:selected
+  --template ./tmp/ap-onboarding/selected-template.zip \
+  --context ./tmp/ap-onboarding-template-01 --tag harbor-onboarding-template:selected
 docker build -f examples/clawworker-preview/ap-onboarding.Dockerfile \
   --build-arg TEMPLATE_IMAGE=harbor-onboarding-template:selected \
   -t harbor-ap-onboarding:fresh examples/clawworker-preview
@@ -25,13 +37,13 @@ The build context path must be new. When changing templates, rebuild this fixtur
 too: its installed skill copies must match the selected package. Do not base this
 fixture on a matching task image that already contains an initialized AP ledger.
 
-Copy `ap-onboarding.yaml`, set `template` to the same ZIP, and choose the model/API.
+In the copied `ap-onboarding.yaml`, choose the model/API.
 Keep `base_image: harbor-ap-onboarding:fresh`. Supply `MODEL_API_KEY` and
 `ADP_API_KEY` through the environment, then run the existing experiment command:
 
 ```sh
 python -m harbor.agents.clawworker_preview.experiment \
-  --config /absolute/path/to/ap-onboarding.yaml --output /tmp/ap-onboarding-run
+  --config ./tmp/ap-onboarding/ap-onboarding.yaml --output ./tmp/ap-onboarding/run-01
 ```
 
 Output must be a new directory. Each attempt gets fresh writable state. Reusing

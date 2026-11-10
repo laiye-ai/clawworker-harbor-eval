@@ -13,7 +13,11 @@ import zipfile
 import pytest
 
 from harbor.agents.clawworker_preview import template_image
-from harbor.agents.clawworker_preview.experiment import ExperimentConfig, run_experiment
+from harbor.agents.clawworker_preview.experiment import (
+    ExperimentConfig,
+    load_config,
+    run_experiment,
+)
 from harbor.models.model_api_format import ModelApiFormat
 from harbor.models.trial.config import AgentConfig
 from tests.unit.agents.test_clawworker_template_image import package_bytes
@@ -177,19 +181,28 @@ async def test_selected_config_builds_image_loads_template_and_runs_question(
     )
     monkeypatch.setenv("TEST_MODEL_API_KEY", "synthetic-model-key")
     monkeypatch.setenv("ADP_API_KEY", "synthetic-adp-key")
-    config = ExperimentConfig(
-        template=package,
-        question="Check the attached input and report the actual result.",
-        attachments=[attachment],
-        verifier=verifier,
-        agent=AgentConfig(
-            name="clawworker-preview",
-            model_name="openai/test-model",
-            base_url=preview_model.base_url,
-            model_api_key_name="TEST_MODEL_API_KEY",
-            model_api_format=ModelApiFormat.OPENAI_CHAT_COMPLETIONS,
-        ),
+    profile = tmp_path / "experiment.yaml"
+    profile.write_text(
+        json.dumps(
+            {
+                "template": "./template.zip",
+                "question": "Check the attached input and report the actual result.",
+                "attachments": ["./input.txt"],
+                "verifier": "./verify.sh",
+                "agent": {
+                    "name": "clawworker-preview",
+                    "model_name": "openai/test-model",
+                    "base_url": preview_model.base_url,
+                    "model_api_key_name": "TEST_MODEL_API_KEY",
+                    "model_api_format": "openai_chat_completions",
+                },
+            }
+        )
     )
+    launcher = tmp_path / "unrelated launch directory"
+    launcher.mkdir()
+    monkeypatch.chdir(launcher)
+    config = load_config(profile)
     async with asyncio.timeout(300):
         summary = await run_experiment(config, tmp_path / "experiment")
     assert summary["stats"]["n_completed_trials"] == 1

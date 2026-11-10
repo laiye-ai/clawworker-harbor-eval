@@ -1,7 +1,7 @@
-# Local dataset profile: AP 1.5.36 and DeepSeek Flash. Keys stay in runtime env.
+# Six-batch AP profile. Paths are relative to this file; keys stay in runtime env.
 # For matching-only turns, the AP Worker must already be initialized in the
 # test image/state. A fresh Worker otherwise follows its onboarding rules.
-template: /mnt/e/Desktop/模板/ap-specialist-demo-1.5.36.zip
+template: ./selected-template.zip
 agent:
   name: clawworker-preview
   model_name: openai/deepseek-flash
@@ -17,39 +17,39 @@ cases:
       # Turn 1: source case01.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/PO-B261105010332-01.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/DN-B261105010332-01.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/INV-B261105010332-01.pdf
+          - ./inputs/case01/po.pdf
+          - ./inputs/case01/delivery.pdf
+          - ./inputs/case01/invoice.pdf
       # Turn 2: source case04.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/55540078.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/42G9-898100.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/NP6_70_007998.pdf
+          - ./inputs/case04/po.pdf
+          - ./inputs/case04/delivery.pdf
+          - ./inputs/case04/invoice.pdf
       # Turn 3: source case07.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/POWTEHC84.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/DN-385-52318.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/SI_7316_42YVA.pdf
+          - ./inputs/case07/po.pdf
+          - ./inputs/case07/delivery.pdf
+          - ./inputs/case07/invoice.pdf
       # Turn 4: source case06, an independent normal batch after case07.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/T6S_43_150809.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/98242394.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/CVAX-435900.pdf
+          - ./inputs/case06/po.pdf
+          - ./inputs/case06/delivery.pdf
+          - ./inputs/case06/invoice.pdf
       # Turn 5: source case12.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/PO-2610-7115.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/DN-2610-8315.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/FIE-2610-9215.pdf
+          - ./inputs/case12/po.pdf
+          - ./inputs/case12/delivery.pdf
+          - ./inputs/case12/invoice.pdf
       # Turn 6: source case20.
       - question: 请匹配这三份单据。
         attachments:
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/PO-2610-7118.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/DN-2610-8318.pdf
-          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/WOO-2610-9218.pdf
+          - ./inputs/case20/po.pdf
+          - ./inputs/case20/delivery.pdf
+          - ./inputs/case20/invoice.pdf
 
 n_attempts: 1
 timeout_sec: 600

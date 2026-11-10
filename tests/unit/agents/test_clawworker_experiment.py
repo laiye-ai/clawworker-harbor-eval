@@ -21,6 +21,51 @@ def definition_at(tmp_path):
     return definition
 
 
+@pytest.mark.parametrize("profile_name", ["ap-onboarding.yaml", "ap-six-turns.yaml"])
+def test_published_ap_profiles_work_after_relocation(
+    tmp_path, monkeypatch, profile_name
+):
+    from harbor.agents.clawworker_preview.experiment import load_config, make_job
+
+    examples = Path(__file__).resolve().parents[3] / "examples/clawworker-preview"
+    project = tmp_path / "another user's experiment"
+    project.mkdir()
+    profile = project / profile_name
+    profile.write_bytes((examples / profile_name).read_bytes())
+    (project / "selected-template.zip").write_bytes(b"selected local template")
+    cases = ["case01", "case04", "case07", "case06", "case12", "case20"]
+    for case in cases:
+        folder = project / "inputs" / case
+        folder.mkdir(parents=True)
+        for kind in ("po", "delivery", "invoice"):
+            (folder / f"{kind}.pdf").write_bytes(f"{case}:{kind}".encode())
+    launcher = tmp_path / "unrelated working directory"
+    launcher.mkdir()
+    monkeypatch.chdir(launcher)
+
+    config = load_config(profile)
+    assert config.template.read_bytes() == b"selected local template"
+    job = make_job(
+        config, "harbor-template:worker", definition_at(tmp_path), project / "output"
+    )
+    if profile_name == "ap-onboarding.yaml":
+        assert len(config.cases[0].turns) == 5
+        assert not any(turn.attachments for turn in config.cases[0].turns)
+    else:
+        steps = job.tasks[0].path / "steps"
+        for index, case in enumerate(cases, start=1):
+            for kind in ("po", "delivery", "invoice"):
+                staged = (
+                    steps
+                    / f"turn-{index:02}"
+                    / "workdir"
+                    / "attachments"
+                    / f"turn-{index:02}"
+                    / f"{kind}.pdf"
+                )
+                assert staged.read_bytes() == f"{case}:{kind}".encode()
+
+
 @pytest.mark.parametrize("concurrent", [1, 2, 4])
 def test_configured_concurrency_and_attempts_reach_harbor(tmp_path, concurrent):
     from harbor.agents.clawworker_preview.experiment import load_config, make_job

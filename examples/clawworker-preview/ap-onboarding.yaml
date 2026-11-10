@@ -2,7 +2,7 @@
 # Use a fixture with a provisioned workspace/owner/Worker identity. Keys are env-only.
 # Build it as described in ap-onboarding.md; this image contains no AP state.
 base_image: harbor-ap-onboarding:fresh
-template: /mnt/e/Desktop/模板/ap-specialist-demo-1.5.36.zip
+template: ./selected-template.zip
 agent:
   name: clawworker-preview
   model_name: openai/deepseek-flash

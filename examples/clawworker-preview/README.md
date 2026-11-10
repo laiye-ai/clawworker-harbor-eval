@@ -6,22 +6,58 @@ The integration is deliberately one Docker container: Hermes, terminal tools and
 
 Host-managed web/image services and connector brokers are not supplied by this adapter. Direct HTTP tools such as the AP template's ADP calls can use credentials passed into the trial.
 
+## Prerequisites and portable paths
+
+Use a Linux shell (including WSL) with Python 3.12+, Git, Docker with Linux
+containers, and Docker Compose. Node/npm is also needed when building the base
+image from Host source. Install this Harbor checkout's dependencies
+and activate its Python environment before using the commands below. For local
+Docker experiments, `uv sync --locked --no-default-groups` installs the core
+dependencies without the cloud/development extras; then use `source .venv/bin/activate`.
+
+Commands below start at the Harbor checkout, wherever it is located. Template,
+attachment and verifier paths in YAML resolve relative to that YAML file, not
+the launch directory. CLI output/build paths resolve relative to the launch
+directory. Use new directories for each build or run. Local inputs and outputs
+can be kept under the checkout's ignored `tmp/` directory.
+
+The AP template ZIP and PDF datasets are user-supplied inputs and are not included
+in this repository. Copy an example YAML into your own experiment directory and
+put `selected-template.zip` beside it, or edit `template` to your chosen filename.
+The runner reads the template identity from the ZIP and the model/account from
+configuration; no developer's template version or API account is baked in.
+
+Building the Preview base requires access to a Host Git checkout containing the
+commit pinned in `preview.json`. Its location is supplied with `--host-repo`.
+That source may require organization access. Users without source access can
+use a compatible prebuilt base image supplied by a teammate instead, for example
+`docker load --input ./clawworker-preview-base.tar`, and select its tag with
+`base_image` in YAML or `--base-image` in the template builder. This repository
+does not include that image archive or grant access to the Host source.
+
+Paths such as `/workspace/work` and `/opt/hermes` are inside the generated Linux
+container. They are part of its image layout and are the same on every host;
+they are not directories that must exist on your computer.
+
 ## Build
 
 The lock is `src/harbor/agents/clawworker_preview/preview.json`. It pins the Host deployment source, upstream commit, official base image digests and the runtime manifest observed in Global Preview. Both base images are official **v0.22.0** images with upstream commit `e06df9c2eae6901f4c88f464e0ae6e753c0428b8`; only ARM64 is the exact Preview base image.
 
-From the Harbor checkout, prepare a private upstream Git cache if the pinned commit is not already available:
+From the Harbor checkout, set the location of your own authorized Host checkout
+and prepare a local upstream Git cache if the pinned commit is not already available:
 
 ```sh
-git init --bare /tmp/clawworker-preview-hermes.git
-git -C /tmp/clawworker-preview-hermes.git fetch --depth=1 \
+export CLAWWORKER_HOST_REPO="../clawworker"  # change to your own Host checkout
+mkdir -p ./tmp
+git init --bare ./tmp/clawworker-preview-hermes.git
+git -C ./tmp/clawworker-preview-hermes.git fetch --depth=1 \
   https://github.com/NousResearch/hermes-agent.git \
   e06df9c2eae6901f4c88f464e0ae6e753c0428b8
 
 python3 src/harbor/agents/clawworker_preview/build.py \
-  --host-repo /home/admin/workspaces/clawworker \
-  --hermes-repo /tmp/clawworker-preview-hermes.git \
-  --context /tmp/clawworker-preview-build \
+  --host-repo "$CLAWWORKER_HOST_REPO" \
+  --hermes-repo ./tmp/clawworker-preview-hermes.git \
+  --context ./tmp/clawworker-preview-build-01 \
   --tag harbor-clawworker-preview:0.22.0
 ```
 
@@ -57,13 +93,13 @@ Use the reusable template builder below. It validates the selected ZIP using `un
 
 ```sh
 python -m harbor.agents.clawworker_preview.template_image \
-  --template /absolute/path/to/selected-template.zip \
-  --context /tmp/selected-template-build
+  --template ./tmp/my-experiment/selected-template.zip \
+  --context ./tmp/selected-template-build-01
 ```
 
 The context must not exist. The default base is `harbor-clawworker-preview:0.22.0`; `--base-image` selects another locally available compatible image and `--tag` optionally overrides the generated `harbor-template:<id>-<version>-<hash>` tag. The builder replaces the inherited definition in the **new image layer**, preserving the base image and host files. It emits `template.json`, Docker labels and `harbor-image.yaml`. Startup rejects missing/changed template files or inherited leftovers.
 
-To use the image with an existing **prebuilt-image** Harbor task, pass `--extra-docker-compose /tmp/selected-template-build/harbor-image.yaml` to `harbor run`. This overrides the agent container's image. Do not use it to replace a task Dockerfile that adds its own fixtures or dependencies: that would lose those additions. The experiment command below instead builds a task layer on top of the template image and preserves its supplied attachments.
+To use the image with an existing **prebuilt-image** Harbor task, pass `--extra-docker-compose ./tmp/selected-template-build-01/harbor-image.yaml` to `harbor run`. This overrides the agent container's image. Do not use it to replace a task Dockerfile that adds its own fixtures or dependencies: that would lose those additions. The experiment command below instead builds a task layer on top of the template image and preserves its supplied attachments.
 
 For Preview Hermes, the canonical Host renderer registers template skills as external directories, applies SOUL, seeds MEMORY and preserves memory, approval and delegation policies. It then changes only terminal backend/SSH settings to local execution in `/workspace/work`. Template schedules are retained as package content; this adapter does not provision the Host's scheduled jobs.
 
@@ -77,8 +113,8 @@ Copy `experiment.yaml` to your experiment folder. Set its `template`, `agent` co
 export MODEL_API_KEY='your-model-key'
 export ADP_API_KEY='your-test-adp-key'  # only for tasks requiring ADP
 python -m harbor.agents.clawworker_preview.experiment \
-  --config /absolute/path/to/experiment.yaml \
-  --output /tmp/my-worker-experiment
+  --config ./tmp/my-experiment/experiment.yaml \
+  --output ./tmp/my-experiment/run-01
 ```
 
 `--output` must be a new directory. The command validates model credentials, builds the selected template image, adds the supplied attachments in a task image, and uses Harbor's normal `Job` to run and collect results. Set `n_attempts` for repeated fresh trials. The Preview base is reused; replacing a template does not require rebuilding Hermes. No provider key is passed to Docker build.
@@ -98,7 +134,7 @@ The initial end-to-end integration test covers **Preview Hermes**. Native harnes
 
 Results are in `summary.json` and `jobs/run/`, including raw agent output, trajectory and Harbor results. The summary records the selected harness/model, template hashes, loading mode, input hashes, build/execution times, rewards and trial errors. Actual HTTP counts are present when the harness supplies them (currently Preview); other harnesses return **null**, not zero or an inferred call count.
 
-Supply `verifier: /absolute/path/to/check-result.sh` to score a question. The script must write Harbor rewards and can inspect the actual files/database. Without it, verification is disabled and rewards remain null: a completed run is not a claim of AP correctness. `agent.env` can explicitly forward additional runtime credentials by environment-variable reference; do not place literal keys in the config.
+Supply `verifier: ./checks/check-result.sh` to score a question; that path is relative to the YAML. The script must write Harbor rewards and can inspect the actual files/database. Without it, verification is disabled and rewards remain null: a completed run is not a claim of AP correctness. `agent.env` can explicitly forward additional runtime credentials by environment-variable reference; do not place literal keys in the config.
 
 ## Fixed multi-turn conversations and multiple cases
 
