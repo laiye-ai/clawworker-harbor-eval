@@ -1,0 +1,26 @@
+# Paths are resolved relative to this config file. Select a built template ZIP.
+template: ./selected-template.zip
+
+# Existing Harbor AgentConfig fields. Keys stay in environment variables.
+agent:
+  name: clawworker-preview
+  model_name: openai/your-model
+  base_url: https://your-model-endpoint.example/v1
+  model_api_key_name: MODEL_API_KEY
+  model_api_format: openai_chat_completions
+  # For native harnesses, explicitly forward task credentials when needed:
+  # env:
+  #   ADP_API_KEY: ${ADP_API_KEY}
+
+question: |
+  Process the supplied documents using the installed template.
+  Report the actual results and any unresolved requirements.
+attachments: []
+
+# Optional existing shell script. Write scores to /logs/verifier/reward.txt
+# or reward.json. Omit this field for an unscored exploratory question.
+# verifier: ./check-result.sh
+
+n_attempts: 1
+n_concurrent_trials: 1  # maximum complete trials running at once
+timeout_sec: 600

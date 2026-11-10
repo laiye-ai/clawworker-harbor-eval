@@ -1,0 +1,1 @@
+Use the terminal to create `preview-proof.json` in your current workspace. It must contain a JSON object with `native: true`, `workspace` set to the actual current directory, and `adp_key_present` set to whether the ADP_API_KEY environment variable is nonempty. Never print the key or write its value into any file. Check the file and report the actual result.

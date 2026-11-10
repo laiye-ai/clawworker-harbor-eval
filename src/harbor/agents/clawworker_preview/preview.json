@@ -1,0 +1,10 @@
+{
+  "host_commit": "f33c9a9bc818d7f96e6c9a224c4684444adce724",
+  "hermes_commit": "e06df9c2eae6901f4c88f464e0ae6e753c0428b8",
+  "hermes_release": "0.22.0",
+  "runtime_manifest_sha256": "924b61412b0520bae9f1be7e1fc5dd06edff7a3e26c1608037ec505d2112694d",
+  "base_images": {
+    "arm64": "nousresearch/hermes-agent@sha256:14258f345ff9726457e7316240262f7e02110ea17522fdb19d7f4ae2cb5094de",
+    "amd64": "nousresearch/hermes-agent@sha256:c50eef7ccc91db06cdfe729008f45267a7208d899c73dd257c19eb4a30450c7d"
+  }
+}
