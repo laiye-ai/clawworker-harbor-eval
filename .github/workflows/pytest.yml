@@ -89,6 +89,8 @@ jobs:
               tests/
               --ignore=tests/runtime/test_network_policy_matrix_docker.py
               --ignore=tests/runtime/test_network_policy_matrix_podman.py
+              --ignore=tests/runtime/test_clawworker_preview.py
+              --ignore=tests/runtime/test_clawworker_template_experiment.py
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0

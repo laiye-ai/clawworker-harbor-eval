@@ -213,13 +213,26 @@ For example, a two-turn terminal smoke can make three HTTP requests because the 
 
 Build inputs/provenance are in the context's `harbor-build.json`. Docker image IDs can differ across architectures/build metadata while the pinned Hermes source, patched files and original Host runtime manifest remain identical. Single-container timings are comparisons within this benchmark, not Preview cloud latency claims.
 
-## Local validation
+## CI and manual validation
 
-After building the image, run the adapter unit tests and the actual Docker smoke from this checkout:
+The normal Python Tests workflow keeps running the adapter's unit tests and
+Harbor's other runtime tests. It excludes the two Clawworker Docker test files
+because GitHub-hosted runners do not have the custom Preview base image. CI does
+not build or publish that image.
+
+Run the unit tests from this checkout without building an image:
 
 ```sh
-python -m pytest tests/unit/agents/test_clawworker_preview_*.py
-python -m pytest tests/unit/agents/test_clawworker_template_image.py tests/unit/agents/test_clawworker_experiment.py
+python -m pytest tests/unit/agents/test_clawworker_*.py
+```
+
+Run all 13 Clawworker Docker integration cases manually after building the
+`harbor-clawworker-preview:0.22.0` image using the instructions above (or loading
+a compatible image). The tests remain in the repository and are still selected
+by a direct `pytest -m runtime` invocation; only the normal CI workflow excludes
+them:
+
+```sh
 python -m pytest tests/runtime/test_clawworker_preview.py tests/runtime/test_clawworker_template_experiment.py
 ```
 
