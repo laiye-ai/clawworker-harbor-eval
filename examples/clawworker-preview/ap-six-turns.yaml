@@ -1,0 +1,55 @@
+# Local dataset profile: AP 1.5.36 and DeepSeek Flash. Keys stay in runtime env.
+# For matching-only turns, the AP Worker must already be initialized in the
+# test image/state. A fresh Worker otherwise follows its onboarding rules.
+template: /mnt/e/Desktop/模板/ap-specialist-demo-1.5.36.zip
+agent:
+  name: clawworker-preview
+  model_name: openai/deepseek-flash
+  base_url: https://api.deepseek.com/v1
+  model_api_key_name: MODEL_API_KEY
+  model_api_format: openai_chat_completions
+
+# One conversation, six user turns, three PDFs per turn.
+# Source case names and expected answers are NOT included in user messages.
+cases:
+  - name: ap-six-document-batches
+    turns:
+      # Turn 1: source case01.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/PO-B261105010332-01.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/DN-B261105010332-01.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case01/INV-B261105010332-01.pdf
+      # Turn 2: source case04.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/55540078.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/42G9-898100.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case04/NP6_70_007998.pdf
+      # Turn 3: source case07.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/POWTEHC84.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/DN-385-52318.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case07/SI_7316_42YVA.pdf
+      # Turn 4: source case06, an independent normal batch after case07.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/T6S_43_150809.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/98242394.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case06/CVAX-435900.pdf
+      # Turn 5: source case12.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/PO-2610-7115.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/DN-2610-8315.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case12/FIE-2610-9215.pdf
+      # Turn 6: source case20.
+      - question: 请匹配这三份单据。
+        attachments:
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/PO-2610-7118.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/DN-2610-8318.pdf
+          - /mnt/e/Desktop/测试数据/三单匹配20case/case20/WOO-2610-9218.pdf
+
+n_attempts: 1
+timeout_sec: 600

@@ -22,4 +22,5 @@ attachments: []
 # verifier: ./check-result.sh
 
 n_attempts: 1
+n_concurrent_trials: 1  # maximum complete trials running at once
 timeout_sec: 600

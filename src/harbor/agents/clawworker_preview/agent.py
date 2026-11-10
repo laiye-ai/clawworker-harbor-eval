@@ -20,7 +20,7 @@ RUNNER = "/opt/clawworker-harbor/harbor-runtime.py"
 class ClawworkerPreview(Hermes):
     """Reuse Harbor model auth/ATIF, but keep Host's build/config/native Runs."""
 
-    capabilities = AgentCapabilities(base_url=True, atif=True)
+    capabilities = AgentCapabilities(base_url=True, atif=True, resume=True)
 
     @staticmethod
     @override
@@ -68,6 +68,9 @@ class ClawworkerPreview(Hermes):
             raise ValueError("Clawworker Preview requires a model name")
         _, model = self._parse_model_name(self.model_name)
         command = f"{PYTHON} {RUNNER} run --model {shlex.quote(model)}"
+        self._last_run_was_resume = self._resume
+        if self._resume:
+            command += " --resume"
         if self.options.max_turns is not None:
             command += f" --max-turns {int(self.options.max_turns)}"
         env = {

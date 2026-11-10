@@ -9,7 +9,7 @@ import shutil
 import time
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import toml
 import yaml
 
@@ -20,9 +20,25 @@ from harbor.models.trial.config import AgentConfig, TaskConfig, VerifierConfig
 from harbor.models.trial.result import TrialResult
 
 from . import template_image
+from .report import summarize_trial
 
 PREVIEW_AGENT = "harbor.agents.clawworker_preview.agent:ClawworkerPreview"
 NATIVE_HARNESSES = {"hermes", "codex", "claude-code"}
+
+
+class TurnConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1)
+    attachments: list[Path] = Field(default_factory=list)
+    verifier: Path | None = None
+
+
+class CaseConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*$", max_length=64)
+    turns: list[TurnConfig] = Field(min_length=1)
 
 
 class ExperimentConfig(BaseModel):
@@ -30,12 +46,51 @@ class ExperimentConfig(BaseModel):
 
     template: Path
     agent: AgentConfig
-    question: str = Field(min_length=1)
+    question: str | None = Field(default=None, min_length=1)
     attachments: list[Path] = Field(default_factory=list)
     verifier: Path | None = None
+    cases: list[CaseConfig] | None = Field(default=None, min_length=1)
     base_image: str = template_image.BASE_IMAGE
     timeout_sec: float = Field(default=600, gt=0)
     n_attempts: int = Field(default=1, ge=1)
+    n_concurrent_trials: int = Field(default=1, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_questions(self):
+        if self.cases is None:
+            if self.question is None:
+                raise ValueError("Supply question or cases")
+        else:
+            if (
+                self.question is not None
+                or self.attachments
+                or self.verifier is not None
+            ):
+                raise ValueError(
+                    "With cases, put questions, attachments and verifiers in turns"
+                )
+            names = [case.name for case in self.cases]
+            if len(set(names)) != len(names):
+                raise ValueError("Case names must be unique")
+        return self
+
+    def conversations(self) -> list[CaseConfig]:
+        if self.cases is not None:
+            return self.cases
+        if self.question is None:
+            raise ValueError("Supply question or cases")
+        return [
+            CaseConfig(
+                name="experiment",
+                turns=[
+                    TurnConfig(
+                        question=self.question,
+                        attachments=self.attachments,
+                        verifier=self.verifier,
+                    )
+                ],
+            )
+        ]
 
 
 def load_config(path: Path) -> ExperimentConfig:
@@ -47,6 +102,13 @@ def load_config(path: Path) -> ExperimentConfig:
     ]
     if config.verifier is not None:
         config.verifier = (parent / config.verifier.expanduser()).resolve()
+    for case in config.cases or []:
+        for turn in case.turns:
+            turn.attachments = [
+                (parent / p.expanduser()).resolve() for p in turn.attachments
+            ]
+            if turn.verifier is not None:
+                turn.verifier = (parent / turn.verifier.expanduser()).resolve()
     return config
 
 
@@ -71,15 +133,18 @@ def make_job(
     config: ExperimentConfig, image: str, definition: Path, output: Path
 ) -> JobConfig:
     agent = select_agent(config.agent)
-    names = [p.name for p in config.attachments]
-    if len(set(names)) != len(names) or any(
-        not p.is_file() for p in config.attachments
-    ):
-        raise ValueError(
-            "Each attachment must be an existing file with a unique filename"
-        )
-    if config.verifier is not None and not config.verifier.is_file():
-        raise ValueError("Verifier must be an existing test.sh file")
+    cases = config.conversations()
+    for case in cases:
+        for turn in case.turns:
+            names = [p.name for p in turn.attachments]
+            if len(set(names)) != len(names) or any(
+                not p.is_file() for p in turn.attachments
+            ):
+                raise ValueError(
+                    "Each attachment must be an existing file with a unique filename"
+                )
+            if turn.verifier is not None and not turn.verifier.is_file():
+                raise ValueError("Verifier must be an existing test.sh file")
     if (
         agent.import_path != PREVIEW_AGENT
         and agent.kwargs.get("prompt_template_path") is not None
@@ -87,48 +152,73 @@ def make_job(
         raise ValueError(
             "Template loading owns prompt_template_path in this experiment"
         )
-    task = output / "task"
-    task.mkdir(parents=True, exist_ok=False)
-    environment = task / "environment"
-    environment.mkdir()
-    instruction = config.question
-    if config.attachments:
-        attachments = environment / "attachments"
-        attachments.mkdir()
-        instruction += "\n\nThe supplied input files are:\n"
-        for path in config.attachments:
-            destination = attachments / path.name
-            shutil.copyfile(path, destination)
-            destination.chmod(0o644)
-            instruction += "- /workspace/work/attachments/" + path.name + "\n"
-    (task / "instruction.md").write_text(instruction)
-    (environment / "Dockerfile").write_text(
-        "FROM "
-        + image
-        + "\n"
-        + (
-            "COPY --chown=server:server attachments/ /workspace/work/attachments/\n"
-            if config.attachments
-            else ""
+    checked = any(turn.verifier is not None for case in cases for turn in case.turns)
+    tasks = []
+    for case in cases:
+        task = output / "tasks" / case.name if config.cases else output / "task"
+        environment = task / "environment"
+        environment.mkdir(parents=True, exist_ok=False)
+        spec: dict[str, Any] = {
+            "schema_version": "1.4",
+            "task": {"name": "clawworker/" + case.name, "version": "1.0.0"},
+            "agent": {"user": "server", "timeout_sec": config.timeout_sec},
+            "environment": {
+                "cpus": 2,
+                "memory_mb": 4096,
+                "storage_mb": 10240,
+                "workdir": "/workspace/work",
+            },
+            "verifier": {"user": "server", "timeout_sec": 60},
+        }
+        if config.cases:
+            spec["steps"] = []
+            spec["multi_step_reward_strategy"] = "final"
+        for index, turn in enumerate(case.turns, start=1):
+            name = f"turn-{index:02d}"
+            step = task / "steps" / name if config.cases else task
+            step.mkdir(parents=True, exist_ok=True)
+            instruction = turn.question
+            if turn.attachments:
+                relative = "attachments/" + name if config.cases else "attachments"
+                root = step / "workdir" if config.cases else environment
+                attachments = root / relative
+                attachments.mkdir(parents=True)
+                instruction += "\n\nThe supplied input files are:\n"
+                for path in turn.attachments:
+                    destination = attachments / path.name
+                    shutil.copyfile(path, destination)
+                    destination.chmod(0o644)
+                    instruction += f"- /workspace/work/{relative}/{path.name}\n"
+            (step / "instruction.md").write_text(instruction)
+            if turn.verifier is not None:
+                (step / "tests").mkdir()
+                shutil.copyfile(turn.verifier, step / "tests/test.sh")
+            if config.cases:
+                spec["steps"].append(
+                    {"name": name, **({"min_reward": 1} if turn.verifier else {})}
+                )
+        if checked and not (task / "tests/test.sh").exists():
+            (task / "tests").mkdir(exist_ok=True)
+            (task / "tests/test.sh").write_text(
+                "#!/bin/sh\nprintf '{}' > /logs/verifier/reward.json\n"
+            )
+        (environment / "Dockerfile").write_text(
+            "FROM "
+            + image
+            + "\n"
+            + (
+                "COPY --chown=server:server attachments/ /workspace/work/attachments/\n"
+                if not config.cases and config.attachments
+                else ""
+            )
         )
-    )
-    (environment / "docker-compose.yaml").write_text(
-        'services:\n  main:\n    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
-    )
-    (task / "task.toml").write_text(
-        toml.dumps(
-            {
-                "schema_version": "1.4",
-                "task": {"name": "clawworker/experiment", "version": "1.0.0"},
-                "agent": {"user": "server", "timeout_sec": config.timeout_sec},
-                "environment": {"cpus": 2, "memory_mb": 4096, "storage_mb": 10240},
-                "verifier": {"user": "server", "timeout_sec": 60},
-            }
+        (environment / "docker-compose.yaml").write_text(
+            'services:\n  main:\n    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
         )
-    )
-    if config.verifier is not None:
-        (task / "tests").mkdir()
-        shutil.copyfile(config.verifier, task / "tests/test.sh")
+        (task / "task.toml").write_text(toml.dumps(spec))
+        tasks.append(TaskConfig(path=task))
+    if config.cases:
+        agent.resume_trajectory = True
     if agent.import_path != PREVIEW_AGENT:
         # These harnesses already consume Harbor's prompt_template_path and
         # skills interfaces. This is distinct from Host-native template loading.
@@ -145,11 +235,11 @@ def make_job(
         job_name="run",
         jobs_dir=output / "jobs",
         agents=[agent],
-        tasks=[TaskConfig(path=task)],
+        tasks=tasks,
         n_attempts=config.n_attempts,
-        n_concurrent_trials=1,
+        n_concurrent_trials=config.n_concurrent_trials,
         quiet=True,
-        verifier=VerifierConfig(disable=config.verifier is None),
+        verifier=VerifierConfig(disable=not checked),
     )
 
 
@@ -167,42 +257,52 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
     job_config = make_job(
         config, image["image"], output / "template-build/definition", output
     )
-    inputs = [
-        {
-            "name": p.name,
-            "sha256": hashlib.sha256(
-                (output / "task/environment/attachments" / p.name).read_bytes()
-            ).hexdigest(),
-        }
-        for p in config.attachments
-    ]
+    cases = config.conversations()
+    inputs = []
+    for case in cases:
+        task = output / "tasks" / case.name if config.cases else output / "task"
+        for index, turn in enumerate(case.turns, start=1):
+            name = f"turn-{index:02d}"
+            root = (
+                task / "steps" / name / "workdir/attachments" / name
+                if config.cases
+                else task / "environment/attachments"
+            )
+            for attachment in turn.attachments:
+                inputs.append(
+                    {
+                        "name": attachment.name,
+                        "sha256": hashlib.sha256(
+                            (root / attachment.name).read_bytes()
+                        ).hexdigest(),
+                        **({"case": case.name, "turn": name} if config.cases else {}),
+                    }
+                )
     (output / "job.json").write_text(job_config.model_dump_json(indent=2))
     job = await Job.create(job_config)
     result = await job.run()
     trials = []
     for path in sorted(job.job_dir.glob("*/result.json")):
         trial = TrialResult.model_validate_json(path.read_text())
-        metadata = (trial.agent_result.metadata or {}) if trial.agent_result else {}
-        timing = trial.agent_execution
-        trials.append(
-            {
-                "name": trial.trial_name,
-                "agent": trial.agent_info.model_dump(mode="json"),
-                "exception": trial.exception_info.model_dump(mode="json")
-                if trial.exception_info
-                else None,
-                "rewards": trial.verifier_result.rewards
-                if trial.verifier_result
-                else None,
-                "llm_http_requests": metadata.get("llm_http_requests"),
-                "agent_execution_seconds": (
-                    timing.finished_at - timing.started_at
-                ).total_seconds()
-                if timing and timing.started_at and timing.finished_at
-                else None,
-                "result": str(path),
-            }
+        case = next(
+            case for case in cases if trial.task_name == "clawworker/" + case.name
         )
+        trials.append(
+            summarize_trial(
+                trial,
+                path,
+                case.name,
+                [(t.question, t.verifier is not None) for t in case.turns],
+            )
+        )
+    evaluation = {
+        state: sum(t["verification_status"] == state for t in trials)
+        for state in ("passed", "failed", "unverified", "incomplete")
+    }
+    scored_trials = sum(t["scored"] for t in trials)
+    evaluation["pass_rate"] = (
+        evaluation["passed"] / scored_trials if scored_trials else None
+    )
     summary = {
         "template": image,
         "template_loading": "host-native"
@@ -210,9 +310,13 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
         else "harbor-prompt-and-skills",
         "harness": config.agent.name or config.agent.import_path,
         "model": config.agent.model_name,
-        "question_sha256": hashlib.sha256(config.question.encode()).hexdigest(),
+        "n_concurrent_trials": config.n_concurrent_trials,
+        "question_sha256": hashlib.sha256(config.question.encode()).hexdigest()
+        if config.question
+        else None,
         "attachments": inputs,
-        "scored": config.verifier is not None,
+        "scored": any(t.verifier is not None for c in cases for t in c.turns),
+        "evaluation": evaluation,
         "build_seconds": build_seconds,
         "elapsed_seconds": time.monotonic() - started,
         "stats": result.stats.model_dump(mode="json"),

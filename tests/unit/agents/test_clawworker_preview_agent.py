@@ -67,6 +67,29 @@ async def test_run_failure_is_not_reported_as_success(tmp_path, monkeypatch):
         await agent.run("task", environment, AgentContext())
 
 
+@pytest.mark.asyncio
+async def test_resume_uses_native_previous_session_not_a_fresh_conversation(
+    tmp_path, monkeypatch
+):
+    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    agent = ClawworkerPreview(
+        logs_dir=tmp_path,
+        model_name="openai/test-model",
+        base_url="https://model.example/v1",
+    )
+    environment = AsyncMock()
+    environment.exec.return_value = ExecResult(return_code=0)
+    assert agent.capabilities.resume is True
+    await agent.resume("Second user message", environment, AgentContext())
+    call = environment.exec.call_args.kwargs
+    assert " --resume" in call["command"]
+    assert call["env"]["PREVIEW_INSTRUCTION"] == "Second user message"
+    await agent.run("Independent question", environment, AgentContext())
+    assert " --resume" not in environment.exec.call_args.kwargs["command"]
+
+
 def test_metrics_preserve_actual_request_count_and_native_usage(tmp_path):
     from harbor.agents.clawworker_preview.agent import ClawworkerPreview
 

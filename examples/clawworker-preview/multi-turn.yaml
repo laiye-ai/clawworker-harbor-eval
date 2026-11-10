@@ -1,0 +1,36 @@
+# Replace package, API/model and input paths; paths are relative to this YAML.
+# Each case starts a fresh container. Put onboarding and subsequent work in the
+# SAME case when they must share configuration. AP prerequisites still apply.
+template: ./selected-template.zip
+agent:
+  name: clawworker-preview
+  model_name: openai/your-model
+  base_url: https://your-model-endpoint.example/v1
+  model_api_key_name: MODEL_API_KEY
+  model_api_format: openai_chat_completions
+
+cases:
+  - name: missing-delivery
+    turns:
+      - question: |
+          Match this invoice and purchase order. Report any missing evidence.
+        attachments: [./inputs/invoice.pdf, ./inputs/po.pdf]
+        # Optional guard: check the actual missing-document result or expected
+        # question before sending the next fixed answer. Write reward=1 to pass.
+        # verifier: ./checks/expect-missing-delivery.sh
+      - question: Here is the delivery note. Continue the same match.
+        attachments: [./inputs/delivery.pdf]
+        # Check the actual SQLite match/allocation records, not just the reply.
+        # verifier: ./checks/expect-matched.sh
+      - question: Summarize what was matched and what remains unresolved.
+
+  - name: ordinary-three-way
+    turns:
+      - question: Match these three documents using the installed template.
+        attachments: [./inputs/invoice.pdf, ./inputs/po.pdf, ./inputs/delivery.pdf]
+        # verifier: ./checks/expect-matched.sh
+
+# Each attempt repeats each complete case with fresh state; it is not a turn.
+n_attempts: 1
+n_concurrent_trials: 1  # turns inside each trial remain sequential
+timeout_sec: 600  # per turn

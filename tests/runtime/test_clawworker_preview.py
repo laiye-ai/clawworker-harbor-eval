@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -12,6 +13,41 @@ from harbor.models.trial.config import AgentConfig, TaskConfig, TrialConfig
 from harbor.trial.trial import Trial
 
 pytestmark = [pytest.mark.runtime, pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def test_configuration_uses_the_provisioned_worker_identity():
+    worker = "prun_0123456789abcdef0123456789abcdef"
+    code = """
+import importlib.util,json,os
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('runtime','/opt/clawworker-harbor/harbor-runtime.py')
+runtime=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
+home=Path('/opt/data/harbor')
+runtime.configure(home,Path('/opt/clawworker-harbor/definition'),Path.cwd(),'fixture','http://127.0.0.1:5001/v1',5002,None)
+contract=json.loads((home/'framework-contract.json').read_text())
+assert contract['worker_id']==os.environ['CLAWWORKER_WORKER_ID'],contract
+"""
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "-e",
+            f"CLAWWORKER_WORKER_ID={worker}",
+            "--entrypoint",
+            "/opt/hermes/.venv/bin/python",
+            "harbor-clawworker-preview:0.22.0",
+            "-c",
+            code,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 async def test_preview_gateway_executes_in_harbor_container(

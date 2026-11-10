@@ -21,6 +21,157 @@ def definition_at(tmp_path):
     return definition
 
 
+@pytest.mark.parametrize("concurrent", [1, 2, 4])
+def test_configured_concurrency_and_attempts_reach_harbor(tmp_path, concurrent):
+    from harbor.agents.clawworker_preview.experiment import load_config, make_job
+
+    profile = tmp_path / "experiment.yaml"
+    profile.write_text(
+        "template: selected.zip\nagent:\n  name: clawworker-preview\n"
+        "question: Check the documents.\nn_attempts: 6\n"
+        f"n_concurrent_trials: {concurrent}\n"
+    )
+    config = load_config(profile)
+    job = make_job(
+        config, "harbor-template:worker", definition_at(tmp_path), tmp_path / "run"
+    )
+    assert job.n_concurrent_trials == concurrent
+    assert job.n_attempts == 6
+
+
+def test_omitted_concurrency_keeps_serial_execution(tmp_path):
+    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+
+    config = ExperimentConfig(
+        template=tmp_path / "selected.zip",
+        agent=AgentConfig(name="clawworker-preview"),
+        question="Check the documents.",
+    )
+    job = make_job(
+        config, "harbor-template:worker", definition_at(tmp_path), tmp_path / "run"
+    )
+    assert job.n_concurrent_trials == 1
+
+
+@pytest.mark.parametrize("invalid", [0, -1, 1.5, True, "2"])
+def test_concurrency_requires_a_positive_integer(invalid):
+    from harbor.agents.clawworker_preview.experiment import ExperimentConfig
+
+    with pytest.raises(ValueError):
+        ExperimentConfig(
+            template="selected.zip",
+            agent=AgentConfig(name="clawworker-preview"),
+            question="Check the documents.",
+            n_concurrent_trials=invalid,
+        )
+
+
+def test_fixed_cases_use_native_steps_and_stage_only_current_turn_inputs(tmp_path):
+    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from harbor.models.task.task import Task
+
+    invoice = tmp_path / "invoice.pdf"
+    invoice.write_bytes(b"invoice")
+    delivery = tmp_path / "delivery.pdf"
+    delivery.write_bytes(b"delivery")
+    verifier = tmp_path / "check.sh"
+    verifier.write_text("echo 1 > /logs/verifier/reward.txt\n")
+    config = ExperimentConfig(
+        template=tmp_path / "template.zip",
+        agent=AgentConfig(name="clawworker-preview", model_name="openai/test"),
+        cases=[
+            {
+                "name": "missing-document",
+                "turns": [
+                    {"question": "Match this invoice.", "attachments": [invoice]},
+                    {
+                        "question": "Here is the missing delivery.",
+                        "attachments": [delivery],
+                        "verifier": verifier,
+                    },
+                ],
+            },
+            {"name": "other-question", "turns": [{"question": "Show the status."}]},
+        ],
+    )
+    job = make_job(
+        config, "harbor-template:worker", definition_at(tmp_path), tmp_path / "run"
+    )
+    assert job.agents[0].resume_trajectory is True
+    assert len(job.tasks) == 2
+    task = Task(job.tasks[0].path)
+    assert [step.name for step in task.config.steps] == ["turn-01", "turn-02"]
+    assert task.config.steps[0].min_reward is None
+    assert task.config.steps[1].min_reward == 1
+    assert not list(task.paths.environment_dir.rglob("*.pdf"))
+    assert (
+        task.paths.step_workdir_dir("turn-01") / "attachments/turn-01/invoice.pdf"
+    ).read_bytes() == b"invoice"
+    assert (
+        task.paths.step_workdir_dir("turn-02") / "attachments/turn-02/delivery.pdf"
+    ).read_bytes() == b"delivery"
+    assert "delivery.pdf" not in task.step_instruction("turn-01")
+    assert "/workspace/work/attachments/turn-02/delivery.pdf" in task.step_instruction(
+        "turn-02"
+    )
+    assert (
+        task.paths.step_test_path_for(
+            "turn-02", task.config.environment.os
+        ).read_bytes()
+        == verifier.read_bytes()
+    )
+    assert "{}" in (task.paths.tests_dir / "test.sh").read_text()
+    assert job.verifier.disable is False
+
+
+def test_fixed_case_paths_resolve_relative_to_config(tmp_path):
+    from harbor.agents.clawworker_preview.experiment import load_config
+
+    path = tmp_path / "dialogue.yaml"
+    path.write_text("""template: template.zip
+agent:
+  name: clawworker-preview
+cases:
+  - name: follow-up
+    turns:
+      - question: Continue with this file.
+        attachments: [delivery.pdf]
+        verifier: check.sh
+""")
+    config = load_config(path)
+    turn = config.cases[0].turns[0]
+    assert turn.attachments == [tmp_path / "delivery.pdf"]
+    assert turn.verifier == tmp_path / "check.sh"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {
+            "question": "ambiguous",
+            "cases": [{"name": "one", "turns": [{"question": "q"}]}],
+        },
+        {"cases": []},
+        {"cases": [{"name": "one", "turns": []}]},
+        {"cases": [{"name": "../escape", "turns": [{"question": "q"}]}]},
+        {"cases": [{"name": "same", "turns": [{"question": "q"}]}] * 2},
+        {
+            "cases": [{"name": "one", "turns": [{"question": "q"}]}],
+            "attachments": ["unassigned.pdf"],
+        },
+    ],
+)
+def test_fixed_cases_reject_ambiguous_or_invalid_scenarios(extra):
+    from harbor.agents.clawworker_preview.experiment import ExperimentConfig
+
+    with pytest.raises(ValueError):
+        ExperimentConfig(
+            template="template.zip",
+            agent=AgentConfig(name="clawworker-preview"),
+            **extra,
+        )
+
+
 def test_preview_job_uses_selected_image_model_question_and_inputs(tmp_path):
     from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 

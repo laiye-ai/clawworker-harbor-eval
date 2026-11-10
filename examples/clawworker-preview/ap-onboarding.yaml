@@ -1,0 +1,22 @@
+# Fresh Worker: no AP database, no confirmed preferences, no ready-state seed.
+# Use a fixture with a provisioned workspace/owner/Worker identity. Keys are env-only.
+# Build it as described in ap-onboarding.md; this image contains no AP state.
+base_image: harbor-ap-onboarding:fresh
+template: /mnt/e/Desktop/模板/ap-specialist-demo-1.5.36.zip
+agent:
+  name: clawworker-preview
+  model_name: openai/deepseek-flash
+  base_url: https://api.deepseek.com/v1
+  model_api_key_name: MODEL_API_KEY
+  model_api_format: openai_chat_completions
+cases:
+  - name: ap-onboarding
+    turns:
+      - question: 你好，请帮我完成这个新 AP Worker 的初始化。
+      - question: "Document source: Upload files in this chat."
+      - question: "Ledger: Handle everything in this chat."
+      - question: "Finance system: Prepare accounting drafts only."
+      - question: "Variance tolerance: Ask me about every difference (0%)."
+n_attempts: 1
+n_concurrent_trials: 1
+timeout_sec: 600

@@ -100,6 +100,58 @@ Results are in `summary.json` and `jobs/run/`, including raw agent output, traje
 
 Supply `verifier: /absolute/path/to/check-result.sh` to score a question. The script must write Harbor rewards and can inspect the actual files/database. Without it, verification is disabled and rewards remain null: a completed run is not a claim of AP correctness. `agent.env` can explicitly forward additional runtime credentials by environment-variable reference; do not place literal keys in the config.
 
+## Fixed multi-turn conversations and multiple cases
+
+Use `multi-turn.yaml` with the same command. Replace the top-level `question`, `attachments` and `verifier` with `cases`. Each named case contains ordered `turns`; each turn has `question` and optional `attachments` and `verifier`. Do not combine the two config forms. This sends fixed user messages, without another model acting as the user.
+
+Rebuild the Preview base once with the current `build.py` when upgrading this adapter: its container helper now accepts native session continuation. Afterwards, changing only a template still rebuilds only the template/task layers.
+
+```yaml
+cases:
+  - name: follow-up
+    turns:
+      - question: Match this invoice and PO; report missing evidence.
+        attachments: [./invoice.pdf, ./po.pdf]
+        verifier: ./expect-missing.sh
+      - question: Here is the missing delivery. Continue.
+        attachments: [./delivery.pdf]
+        verifier: ./expect-matched.sh
+  - name: separate-question
+    turns:
+      - question: Explain which documents you need for matching.
+```
+
+Within a case, Harbor reuses the container, native conversation, workspace, template memory and business database. Preview resumes using the preceding Runs API `session_id`, including any native session rotation. Attachments are uploaded only before their turn under `/workspace/work/attachments/turn-XX/`; future files are not baked into the image. Earlier files remain available. `timeout_sec` applies separately to each turn.
+
+Each case and each `n_attempts` repetition starts fresh. Cases do not inherit another case's onboarding, files or SQLite state. To test onboarding followed by processing, put the initialization answers and subsequent requests in the same case. This runner does not bypass the template's configuration requirements or supply Host connectors/interactive UI. Native `hermes`, `codex` and `claude-code` use Harbor's existing session-resume support; their live multi-turn API execution still needs separate validation with the selected account/model.
+
+For fresh AP initialization, use [ap-onboarding.md](ap-onboarding.md) and its fixed five-turn profile. The Docker fixture supplies only runtime identity, workspace and installed skills; AP state and answers are created by the conversation.
+
+Set `n_concurrent_trials` to control Harbor's maximum active trials. It defaults to
+1 and accepts only positive integers. For example, `n_attempts: 6` with
+`n_concurrent_trials: 2` repeats each case six times, scheduling at most two trials
+at once. With three cases this creates 18 trials, not six. All turns within a
+trial stay sequential and share that trial's native session and workspace.
+Separate trials use separate containers and logs. The selected limit is recorded
+in `job.json` and `summary.json`; it is a scheduling ceiling, not a guarantee of
+that many simultaneously active model requests.
+
+Harbor supplies the queue and concurrency limit; this adapter does not add a
+second scheduler. Model/ADP rate limits are still shared by account. Each task is
+currently limited to 2 CPUs and 4096 MiB; the memory limit is not a reservation.
+Choose concurrency for the available resources and API quota. The fresh onboarding
+fixture assigns a different Worker identity per container so attempts do not
+share a Worker-scoped ADP mapping. External data seeded by other custom fixtures
+is their responsibility and is not automatically cloned by Harbor.
+
+A supplied verifier must write `1` to `/logs/verifier/reward.txt` to pass (or `{"reward":1}` to `reward.json`). A lower/missing reward or verification error stops that case before the next fixed answer. Other independent cases continue. Use a verifier to guard answers that depend on a particular question; an unchecked turn advances when its agent execution finishes. Verifiers run after the turn and can inspect the actual workspace/database and `/logs/agent/result.json` for Preview's actual reply. Do not infer a successful match from the model's wording. Unchecked turns emit no score, even in a job containing other checked turns.
+
+`summary.json` includes `trials[].turns[]` with the exact user question, actual reply, native run/session IDs, runtime status, verification status/rewards, timestamps, elapsed execution, token usage, HTTP attempts and raw-log directory. Unsent turns appear as `not_run` with no invented zero-call success. Per-turn raw files live in `jobs/run/<trial>/steps/turn-XX/agent/`. The experiment records attachment hashes with case/turn labels.
+
+`execution_complete` means all scripted turns executed. `verification_status` is `passed`, `failed`, `unverified` or `incomplete`; only supplied checks establish a verified result. `evaluation.pass_rate` is passed cases divided by scored cases/attempts, counting incomplete scored attempts as not passed and excluding unscored exploration. Its meaning depends on the quality/coverage of your checks, not the agent's self-assessment.
+
+For minimal changes, each Preview turn starts and stops its Gateway process while retaining the native session database. `agent_execution_seconds` includes that startup/shutdown and Harbor invocation; `native_execution_seconds` separately measures the admitted native run. HTTP counts include real retry/auxiliary attempts within that turn. These local timings do not reproduce cloud notification, MicroVM or NFS overhead.
+
 ## Results
 
 Agent artifacts include:
@@ -110,6 +162,16 @@ Agent artifacts include:
 - `gateway.log`: native startup/diagnostic output for this disposable trial.
 
 The same metrics are copied into `AgentContext.metadata`. `llm_http_requests` counts actual POST attempts seen by the model relay, including SDK retries and auxiliary requests; it is not a count of chat messages or a guarantee of distinct logical model turns. Unsupported routes and infrastructure failures must not be reported as zero-call successes.
+
+Each `model_requests` entry now records `request_index` (starting at 1 within each user turn), HTTP `status`, `duration_seconds`, and that response's `usage`:
+
+```json
+{"request_index":1,"status":200,"duration_seconds":3.2,"usage":{"input_tokens":120,"output_tokens":7,"total_tokens":127,"cache_read_tokens":100,"cache_write_tokens":null}}
+```
+
+Counters come from the provider response, including the usage event in a streaming SSE response. The relay observes bytes without changing the request or forwarded response. Streaming usage snapshots replace earlier snapshots; they are never added together. Missing usage, truncated responses and unavailable counters remain `null`, while an explicitly reported zero stays zero. No token estimation is used, and no prompts, credentials or arbitrary response fields are added to metrics.
+
+Find individual calls in `summary.json` at `trials[].turns[].model_requests[]`, or the turn's `preview-metrics.json`. This differs from `turns[].usage`, which retains the existing native Runs aggregate. Request records can also include auxiliary calls, so their known usage need not equal the native main-agent total. Do not add these two accounting levels together. Historical runs without per-request usage cannot be backfilled exactly; rebuild the base and run a new test to collect it.
 
 For example, a two-turn terminal smoke can make three HTTP requests because the native Gateway also generates a session title. Native `usage` describes the run's conversation usage; it need not include auxiliary requests counted by the relay.
 

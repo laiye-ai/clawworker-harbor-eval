@@ -107,6 +107,71 @@ def verify_template(definition: Path, receipt: Path) -> dict[str, Any] | None:
     return identity
 
 
+class ResponseUsage:
+    """Observe JSON/SSE usage without modifying the forwarded response bytes."""
+
+    def __init__(self, content_type: str):
+        self.streaming = "text/event-stream" in content_type.lower()
+        self.buffer = b""
+        self.data: list[bytes] = []
+        self.usage: dict[str, int | None] | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        self.buffer += chunk
+        if self.streaming:
+            while b"\n" in self.buffer:
+                line, self.buffer = self.buffer.split(b"\n", 1)
+                self._line(line.rstrip(b"\r"))
+
+    def _line(self, line: bytes) -> None:
+        if not line:
+            if self.data:
+                self._record(b"\n".join(self.data))
+                self.data.clear()
+        elif line.startswith(b"data:"):
+            self.data.append(line[5:].removeprefix(b" "))
+
+    def _record(self, raw: bytes) -> None:
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeError):
+            return
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if not isinstance(usage, dict):
+            return
+        details = usage.get("prompt_tokens_details")
+        details = details if isinstance(details, dict) else {}
+
+        def counter(*values):
+            return next((v for v in values if type(v) is int and v >= 0), None)
+
+        # Streaming usage is a snapshot, not an increment to sum across chunks.
+        self.usage = {
+            "input_tokens": counter(
+                usage.get("prompt_tokens"), usage.get("input_tokens")
+            ),
+            "output_tokens": counter(
+                usage.get("completion_tokens"), usage.get("output_tokens")
+            ),
+            "total_tokens": counter(usage.get("total_tokens")),
+            "cache_read_tokens": counter(
+                usage.get("prompt_cache_hit_tokens"),
+                details.get("cached_tokens"),
+                usage.get("cache_read_input_tokens"),
+            ),
+            "cache_write_tokens": counter(usage.get("cache_creation_input_tokens")),
+        }
+
+    def finish(self) -> None:
+        if self.streaming:
+            if self.buffer:
+                self._line(self.buffer.rstrip(b"\r"))
+            self._line(b"")
+        else:
+            self._record(self.buffer)
+        self.buffer = b""
+
+
 class ModelRelay:
     """Forward the Host's OpenAI-compatible route and count actual HTTP attempts."""
 
@@ -143,9 +208,11 @@ class ModelRelay:
                     self.send_error(404)
                     return
                 started = time.monotonic()
-                row = {"status": None, "duration_seconds": None}
+                row = {"status": None, "duration_seconds": None, "usage": None}
                 with relay.lock:
+                    row["request_index"] = len(relay.requests) + 1
                     relay.requests.append(row)
+                capture = None
                 try:
                     request = urllib.request.Request(
                         relay.base_url + "/chat/completions",
@@ -161,6 +228,9 @@ class ModelRelay:
                         upstream = error
                     with contextlib.closing(upstream):
                         row["status"] = cast(int, upstream.status)
+                        capture = ResponseUsage(
+                            upstream.headers.get("Content-Type", "application/json")
+                        )
                         self.send_response(row["status"])
                         self.send_header(
                             "Content-Type",
@@ -169,12 +239,17 @@ class ModelRelay:
                         self.send_header("Connection", "close")
                         self.end_headers()
                         while chunk := upstream.read1(65536):
+                            capture.feed(chunk)
+                            row["usage"] = capture.usage
                             self.wfile.write(chunk)
                             self.wfile.flush()
                 except (OSError, ValueError):
                     if row["status"] is None:
                         self.send_error(502, "Model upstream unavailable")
                 finally:
+                    if capture is not None:
+                        capture.finish()
+                        row["usage"] = capture.usage
                     row["duration_seconds"] = time.monotonic() - started
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -207,13 +282,14 @@ def configure(
     relay: str,
     port: int,
     max_turns: int | None,
+    seed_memory: bool = True,
 ):
     # Use the parser shipped by the pinned Hermes image, not Harbor's PyYAML.
     from ruamel.yaml import YAML  # ty: ignore[unresolved-import] -- supplied by the pinned Hermes image
 
     home.mkdir(mode=0o700, parents=True, exist_ok=True)
     (home / "config.yaml").write_text("{}\n")
-    worker = "harbor-preview"
+    worker = os.environ.get("CLAWWORKER_WORKER_ID", "harbor-preview")
     (home / "framework-contract.json").write_text(
         json.dumps(
             {
@@ -233,7 +309,7 @@ def configure(
         "runtimeAssets": str(ROOT / "assets"),
         "runtimeProfile": "conversation-skills-web-image-v1",
         "runtimeManifestSha256": manifest_sha,
-        "seedTemplateMemory": True,
+        "seedTemplateMemory": seed_memory,
         "settings": {
             "model": model,
             "instructions": "",
@@ -274,6 +350,27 @@ def run(args, identity):
     workspace = Path.cwd()
     logs = Path("/logs/agent")
     logs.mkdir(parents=True, exist_ok=True)
+    previous_raw = (
+        (logs / "result.json").read_text()
+        if args.resume and (logs / "result.json").exists()
+        else None
+    )
+    # Never publish the previous turn's result as the current turn after a failure.
+    for name in (
+        "result.json",
+        "preview-metrics.json",
+        "hermes-session.jsonl",
+        "trajectory.json",
+    ):
+        (logs / name).unlink(missing_ok=True)
+    previous_session = None
+    if args.resume:
+        previous = json.loads(previous_raw) if previous_raw else {}
+        previous_session = previous.get("session_id")
+        if previous.get("status") != "completed" or not previous_session:
+            raise ValueError(
+                "Cannot resume without a completed native run and session ID"
+            )
     key = secrets.token_hex(32)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -294,6 +391,7 @@ def run(args, identity):
             relay.url,
             port,
             args.max_turns,
+            seed_memory=not args.resume,
         )
         env = {
             **os.environ,
@@ -334,17 +432,16 @@ def run(args, identity):
                             ) from None
                         time.sleep(0.2)
                 execution_started = time.monotonic()
-                admitted = api(
-                    base + "/v1/runs",
-                    key,
-                    {
-                        "input": os.environ["PREVIEW_INSTRUCTION"],
-                        "model": args.model,
-                        "provider": "clawworker-managed",
-                        "terminal_cwd": str(workspace),
-                        "privacy_review": {"workspace_root": str(workspace)},
-                    },
-                )
+                request = {
+                    "input": os.environ["PREVIEW_INSTRUCTION"],
+                    "model": args.model,
+                    "provider": "clawworker-managed",
+                    "terminal_cwd": str(workspace),
+                    "privacy_review": {"workspace_root": str(workspace)},
+                }
+                if previous_session:
+                    request["session_id"] = previous_session
+                admitted = api(base + "/v1/runs", key, request)
                 while True:
                     status = api(base + "/v1/runs/" + admitted["run_id"], key)
                     if status["status"] in {"completed", "failed", "cancelled"}:
@@ -388,6 +485,7 @@ def run(args, identity):
                     "agent_execution_seconds": locals().get("execution_seconds"),
                     "usage": status.get("usage"),
                     "status": status.get("status", "startup_failed"),
+                    "resumed_from_session_id": previous_session,
                 }
                 (logs / "preview-metrics.json").write_text(
                     json.dumps(metrics, indent=2)
@@ -400,6 +498,7 @@ def main():
     parser.add_argument("--model")
     parser.add_argument("--definition", default="/opt/clawworker-harbor/definition")
     parser.add_argument("--max-turns", type=int)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     lock = json.loads((HERE / "preview.json").read_text())
     identity = verify_runtime(HERMES, ROOT, lock)

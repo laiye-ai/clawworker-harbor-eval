@@ -12,7 +12,7 @@ import pytest
 @pytest.fixture
 def preview_model():
     requests = []
-    fixture = SimpleNamespace(requests=requests, command=None)
+    fixture = SimpleNamespace(requests=requests, command=None, reply=None)
 
     class Model(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -21,8 +21,15 @@ def preview_model():
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append(body)
-            used = any(m.get("role") == "tool" for m in body.get("messages", []))
+            messages = body.get("messages", [])
+            last_user = max(
+                (i for i, m in enumerate(messages) if m.get("role") == "user"),
+                default=-1,
+            )
+            used = any(m.get("role") == "tool" for m in messages[last_user + 1 :])
             message = {"role": "assistant", "content": "Preview terminal verified."}
+            if fixture.reply is not None:
+                message["content"] = fixture.reply(body)
             finish = "stop"
             terminal = any(
                 t.get("function", {}).get("name") == "terminal"
@@ -40,7 +47,11 @@ def preview_model():
                     "'adp_key_present': bool(os.environ.get('ADP_API_KEY'))}))\n"
                     "PY"
                 )
-                command = fixture.command or command
+                command = (
+                    fixture.command(body)
+                    if callable(fixture.command)
+                    else fixture.command or command
+                )
                 message = {
                     "role": "assistant",
                     "content": None,
