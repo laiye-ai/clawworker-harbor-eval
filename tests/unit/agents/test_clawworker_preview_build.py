@@ -6,7 +6,7 @@ import pytest
 
 
 def test_export_uses_committed_host_inputs(tmp_path):
-    from harbor.agents.clawworker_preview.build import export_host
+    from examples.agents.clawworker_preview.build import export_host
 
     repo = tmp_path / "host"
     repo.mkdir()
@@ -42,7 +42,7 @@ def test_export_uses_committed_host_inputs(tmp_path):
 
 
 def test_export_refuses_to_overwrite_an_existing_directory(tmp_path):
-    from harbor.agents.clawworker_preview.build import export_host
+    from examples.agents.clawworker_preview.build import export_host
 
     target = tmp_path / "existing"
     target.mkdir()

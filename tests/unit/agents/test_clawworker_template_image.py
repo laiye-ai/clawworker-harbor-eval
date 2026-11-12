@@ -66,7 +66,7 @@ def install_fixture(tmp_path, template_id="worker-alpha", version="1.0"):
 def test_installed_template_identity_comes_from_actual_package(
     tmp_path, template_id, version
 ):
-    from harbor.agents.clawworker_preview.runtime import verify_template
+    from examples.agents.clawworker_preview.runtime import verify_template
 
     definition, receipt = install_fixture(tmp_path, template_id, version)
     result = verify_template(definition, receipt)
@@ -76,7 +76,7 @@ def test_installed_template_identity_comes_from_actual_package(
 
 @pytest.mark.parametrize("mutation", ["changed", "leftover", "missing", "no-receipt"])
 def test_template_verification_rejects_drift(tmp_path, mutation):
-    from harbor.agents.clawworker_preview.runtime import verify_template
+    from examples.agents.clawworker_preview.runtime import verify_template
 
     definition, receipt = install_fixture(tmp_path)
     if mutation == "changed":
@@ -92,7 +92,7 @@ def test_template_verification_rejects_drift(tmp_path, mutation):
 
 
 def test_template_context_is_derived_from_selected_zip(tmp_path, monkeypatch):
-    from harbor.agents.clawworker_preview import template_image
+    from examples.agents.clawworker_preview import template_image
 
     def docker(command, **kwargs):
         if "inspect" in command:
@@ -130,7 +130,7 @@ def test_template_context_is_derived_from_selected_zip(tmp_path, monkeypatch):
 
 
 def test_rejected_package_creates_no_build_context(tmp_path, monkeypatch):
-    from harbor.agents.clawworker_preview import template_image
+    from examples.agents.clawworker_preview import template_image
 
     def docker(command, **kwargs):
         if "verify" in command:
@@ -150,7 +150,7 @@ def test_rejected_package_creates_no_build_context(tmp_path, monkeypatch):
 
 
 def test_existing_context_is_preserved(tmp_path):
-    from harbor.agents.clawworker_preview import template_image
+    from examples.agents.clawworker_preview import template_image
 
     context = tmp_path / "context"
     context.mkdir()

@@ -22,7 +22,7 @@ from harbor.models.trial.result import TrialResult
 from . import template_image
 from .report import summarize_trial
 
-PREVIEW_AGENT = "harbor.agents.clawworker_preview.agent:ClawworkerPreview"
+PREVIEW_AGENT = "examples.agents.clawworker_preview.agent:ClawworkerPreview"
 NATIVE_HARNESSES = {"hermes", "codex", "claude-code"}
 
 

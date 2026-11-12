@@ -57,7 +57,7 @@ cp examples/clawworker-preview/ap-six-turns.yaml ./tmp/ap-six-turns/
 将模板与 PDF 放入该目录并填写模型配置后，在已安装本 checkout 的 Python 环境中运行。输出目录必须不存在：
 
 ```sh
-python -m harbor.agents.clawworker_preview.experiment \
+python -m examples.agents.clawworker_preview.experiment \
   --config ./tmp/ap-six-turns/ap-six-turns.yaml \
   --output ./tmp/ap-six-turns/run-01
 ```

@@ -48,7 +48,7 @@ def preview_tree(tmp_path):
 
 
 def test_runtime_rejects_changed_patch_even_with_correct_version(preview_tree):
-    from harbor.agents.clawworker_preview.runtime import verify_runtime
+    from examples.agents.clawworker_preview.runtime import verify_runtime
 
     hermes, runtime, lock = preview_tree
     assert verify_runtime(hermes, runtime, lock)["verified_patches"] == 1
@@ -58,7 +58,7 @@ def test_runtime_rejects_changed_patch_even_with_correct_version(preview_tree):
 
 
 def test_runtime_rejects_another_upstream_commit(preview_tree):
-    from harbor.agents.clawworker_preview.runtime import verify_runtime
+    from examples.agents.clawworker_preview.runtime import verify_runtime
 
     hermes, runtime, lock = preview_tree
     (hermes / "install-stamp.json").write_text(
@@ -69,7 +69,7 @@ def test_runtime_rejects_another_upstream_commit(preview_tree):
 
 
 def test_local_backend_preserves_host_policies():
-    from harbor.agents.clawworker_preview.runtime import localize_config
+    from examples.agents.clawworker_preview.runtime import localize_config
 
     config = {
         "terminal": {
@@ -97,7 +97,7 @@ def test_local_backend_preserves_host_policies():
 
 
 def test_model_relay_counts_real_requests_and_preserves_errors():
-    from harbor.agents.clawworker_preview.runtime import ModelRelay
+    from examples.agents.clawworker_preview.runtime import ModelRelay
 
     received = []
 
@@ -210,7 +210,7 @@ def test_model_relay_counts_real_requests_and_preserves_errors():
 def test_relay_captures_each_response_usage_without_changing_bytes(
     streaming, body, expected
 ):
-    from harbor.agents.clawworker_preview.runtime import ModelRelay
+    from examples.agents.clawworker_preview.runtime import ModelRelay
 
     class Upstream(BaseHTTPRequestHandler):
         def log_message(self, *_args):
@@ -252,7 +252,7 @@ def test_relay_captures_each_response_usage_without_changing_bytes(
 
 
 def test_usage_capture_handles_every_byte_boundary_and_keeps_only_numeric_counters():
-    from harbor.agents.clawworker_preview.runtime import ResponseUsage
+    from examples.agents.clawworker_preview.runtime import ResponseUsage
 
     capture = ResponseUsage("text/event-stream")
     raw = 'data: {"choices":[{"delta":{"content":"你"}}]}\n\ndata: {"usage":{"prompt_tokens":0,"completion_tokens":true,"total_tokens":-1,"prompt_cache_hit_tokens":4,"api_key":"secret"}}\n\n'.encode()
@@ -269,7 +269,7 @@ def test_usage_capture_handles_every_byte_boundary_and_keeps_only_numeric_counte
 
 
 def test_stream_usage_snapshots_are_not_added_together():
-    from harbor.agents.clawworker_preview.runtime import ResponseUsage
+    from examples.agents.clawworker_preview.runtime import ResponseUsage
 
     capture = ResponseUsage("text/event-stream")
     capture.feed(b'data: {"usage":{"prompt_tokens":7,"completion_tokens":1}}\n\n')

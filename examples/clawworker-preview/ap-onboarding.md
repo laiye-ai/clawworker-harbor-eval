@@ -25,7 +25,7 @@ can be moved to another machine without editing the runner.
 Build the fixture from that same selected template:
 
 ```sh
-python -m harbor.agents.clawworker_preview.template_image \
+python -m examples.agents.clawworker_preview.template_image \
   --template ./tmp/ap-onboarding/selected-template.zip \
   --context ./tmp/ap-onboarding-template-01 --tag harbor-onboarding-template:selected
 docker build -f examples/clawworker-preview/ap-onboarding.Dockerfile \
@@ -42,7 +42,7 @@ Keep `base_image: harbor-ap-onboarding:fresh`. Supply `MODEL_API_KEY` and
 `ADP_API_KEY` through the environment, then run the existing experiment command:
 
 ```sh
-python -m harbor.agents.clawworker_preview.experiment \
+python -m examples.agents.clawworker_preview.experiment \
   --config ./tmp/ap-onboarding/ap-onboarding.yaml --output ./tmp/ap-onboarding/run-01
 ```
 

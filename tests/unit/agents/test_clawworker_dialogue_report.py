@@ -9,7 +9,7 @@ from harbor.models.verifier.result import VerifierResult
 
 
 def test_turn_report_uses_actual_reply_usage_and_failed_check(tmp_path):
-    from harbor.agents.clawworker_preview.report import summarize_turn
+    from examples.agents.clawworker_preview.report import summarize_turn
 
     (tmp_path / "result.json").write_text(
         json.dumps(
@@ -50,7 +50,7 @@ def test_turn_report_uses_actual_reply_usage_and_failed_check(tmp_path):
 
 
 def test_unexecuted_turn_is_not_zero_call_or_success(tmp_path):
-    from harbor.agents.clawworker_preview.report import summarize_turn
+    from examples.agents.clawworker_preview.report import summarize_turn
 
     result = summarize_turn("An unsent answer.", True, None, tmp_path)
     assert result["runtime_status"] == "not_run"
@@ -60,7 +60,7 @@ def test_unexecuted_turn_is_not_zero_call_or_success(tmp_path):
 
 
 def test_verifier_error_does_not_rewrite_the_actual_native_run_status(tmp_path):
-    from harbor.agents.clawworker_preview.report import summarize_turn
+    from examples.agents.clawworker_preview.report import summarize_turn
 
     (tmp_path / "result.json").write_text(
         json.dumps({"status": "completed", "output": "Actual reply"})
@@ -79,7 +79,7 @@ def test_verifier_error_does_not_rewrite_the_actual_native_run_status(tmp_path):
 
 
 def test_native_cli_reply_can_come_from_atif_but_call_count_is_unknown(tmp_path):
-    from harbor.agents.clawworker_preview.report import summarize_turn
+    from examples.agents.clawworker_preview.report import summarize_turn
 
     (tmp_path / "trajectory.json").write_text(
         json.dumps(

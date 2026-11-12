@@ -15,8 +15,9 @@ and activate its Python environment before using the commands below. For local
 Docker experiments, `uv sync --locked --no-default-groups` installs the core
 dependencies without the cloud/development extras; then use `source .venv/bin/activate`.
 
-Commands below start at the Harbor checkout, wherever it is located. Template,
-attachment and verifier paths in YAML resolve relative to that YAML file, not
+Run the commands below from the Harbor checkout root so Python can import the
+custom agent from `examples.agents.clawworker_preview`. Template, attachment
+and verifier paths in YAML resolve relative to that YAML file, not
 the launch directory. CLI output/build paths resolve relative to the launch
 directory. Use new directories for each build or run. Local inputs and outputs
 can be kept under the checkout's ignored `tmp/` directory.
@@ -41,7 +42,7 @@ they are not directories that must exist on your computer.
 
 ## Build
 
-The lock is `src/harbor/agents/clawworker_preview/preview.json`. It pins the Host deployment source, upstream commit, official base image digests and the runtime manifest observed in Global Preview. Both base images are official **v0.22.0** images with upstream commit `e06df9c2eae6901f4c88f464e0ae6e753c0428b8`; only ARM64 is the exact Preview base image.
+The lock is `examples/agents/clawworker_preview/preview.json`. It pins the Host deployment source, upstream commit, official base image digests and the runtime manifest observed in Global Preview. Both base images are official **v0.22.0** images with upstream commit `e06df9c2eae6901f4c88f464e0ae6e753c0428b8`; only ARM64 is the exact Preview base image.
 
 From the Harbor checkout, set the location of your own authorized Host checkout
 and prepare a local upstream Git cache if the pinned commit is not already available:
@@ -54,7 +55,7 @@ git -C ./tmp/clawworker-preview-hermes.git fetch --depth=1 \
   https://github.com/NousResearch/hermes-agent.git \
   e06df9c2eae6901f4c88f464e0ae6e753c0428b8
 
-python3 src/harbor/agents/clawworker_preview/build.py \
+python3 examples/agents/clawworker_preview/build.py \
   --host-repo "$CLAWWORKER_HOST_REPO" \
   --hermes-repo ./tmp/clawworker-preview-hermes.git \
   --context ./tmp/clawworker-preview-build-01 \
@@ -73,9 +74,9 @@ Install Harbor using its locked dependencies, then supply an OpenAI Chat Complet
 export TEST_MODEL_API_KEY='your-model-key'
 export ADP_API_KEY='your-test-adp-key'
 
-harbor run \
+python -m harbor.cli.main run \
   --path examples/tasks/clawworker-preview-smoke \
-  --agent harbor.agents.clawworker_preview.agent:ClawworkerPreview \
+  --agent examples.agents.clawworker_preview.agent:ClawworkerPreview \
   --model openai/test-model \
   --base-url https://your-model-endpoint.example/v1 \
   --api-key-name TEST_MODEL_API_KEY \
@@ -92,7 +93,7 @@ The agent uses Harbor's normal model/auth resolution. Native Anthropic/Responses
 Use the reusable template builder below. It validates the selected ZIP using `unpackTemplate` bundled from the pinned Host source. This is local package/content validation; it does not simulate Marketplace signatures, Service download authorization or cloud template installation. Template ID, version, file hashes and package SHA-256 come from the selected package, never a hardcoded AP version.
 
 ```sh
-python -m harbor.agents.clawworker_preview.template_image \
+python -m examples.agents.clawworker_preview.template_image \
   --template ./tmp/my-experiment/selected-template.zip \
   --context ./tmp/selected-template-build-01
 ```
@@ -112,7 +113,7 @@ Copy `experiment.yaml` to your experiment folder. Set its `template`, `agent` co
 ```sh
 export MODEL_API_KEY='your-model-key'
 export ADP_API_KEY='your-test-adp-key'  # only for tasks requiring ADP
-python -m harbor.agents.clawworker_preview.experiment \
+python -m examples.agents.clawworker_preview.experiment \
   --config ./tmp/my-experiment/experiment.yaml \
   --output ./tmp/my-experiment/run-01
 ```

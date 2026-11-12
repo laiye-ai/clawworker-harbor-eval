@@ -66,7 +66,7 @@ async def test_preview_gateway_executes_in_harbor_container(
                 + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12],
                 trials_dir=tmp_path / "trials",
                 agent=AgentConfig(
-                    import_path="harbor.agents.clawworker_preview.agent:ClawworkerPreview",
+                    import_path="examples.agents.clawworker_preview.agent:ClawworkerPreview",
                     model_name="openai/test-model",
                     base_url=preview_model.base_url,
                     model_api_key_name="TEST_MODEL_API_KEY",

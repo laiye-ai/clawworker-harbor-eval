@@ -11,7 +11,7 @@ from harbor.models.agent.context import AgentContext
 
 @pytest.mark.asyncio
 async def test_setup_rejects_another_image(tmp_path):
-    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+    from examples.agents.clawworker_preview.agent import ClawworkerPreview
 
     environment = AsyncMock()
     environment.exec.return_value = ExecResult(
@@ -27,7 +27,7 @@ async def test_setup_rejects_another_image(tmp_path):
 async def test_run_passes_model_and_adp_credentials_to_native_entry(
     tmp_path, monkeypatch
 ):
-    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+    from examples.agents.clawworker_preview.agent import ClawworkerPreview
 
     monkeypatch.setenv("OPENAI_API_KEY", "model-private")
     monkeypatch.setenv("ADP_API_KEY", "adp-private")
@@ -53,7 +53,7 @@ async def test_run_passes_model_and_adp_credentials_to_native_entry(
 
 @pytest.mark.asyncio
 async def test_run_failure_is_not_reported_as_success(tmp_path, monkeypatch):
-    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+    from examples.agents.clawworker_preview.agent import ClawworkerPreview
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = ClawworkerPreview(
@@ -71,7 +71,7 @@ async def test_run_failure_is_not_reported_as_success(tmp_path, monkeypatch):
 async def test_resume_uses_native_previous_session_not_a_fresh_conversation(
     tmp_path, monkeypatch
 ):
-    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+    from examples.agents.clawworker_preview.agent import ClawworkerPreview
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     agent = ClawworkerPreview(
@@ -91,7 +91,7 @@ async def test_resume_uses_native_previous_session_not_a_fresh_conversation(
 
 
 def test_metrics_preserve_actual_request_count_and_native_usage(tmp_path):
-    from harbor.agents.clawworker_preview.agent import ClawworkerPreview
+    from examples.agents.clawworker_preview.agent import ClawworkerPreview
 
     (tmp_path / "hermes-session.jsonl").write_text(
         json.dumps(

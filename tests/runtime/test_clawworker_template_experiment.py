@@ -12,8 +12,8 @@ import zipfile
 
 import pytest
 
-from harbor.agents.clawworker_preview import template_image
-from harbor.agents.clawworker_preview.experiment import (
+from examples.agents.clawworker_preview import template_image
+from examples.agents.clawworker_preview.experiment import (
     ExperimentConfig,
     load_config,
     run_experiment,

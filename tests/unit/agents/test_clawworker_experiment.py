@@ -25,7 +25,7 @@ def definition_at(tmp_path):
 def test_published_ap_profiles_work_after_relocation(
     tmp_path, monkeypatch, profile_name
 ):
-    from harbor.agents.clawworker_preview.experiment import load_config, make_job
+    from examples.agents.clawworker_preview.experiment import load_config, make_job
 
     examples = Path(__file__).resolve().parents[3] / "examples/clawworker-preview"
     project = tmp_path / "another user's experiment"
@@ -68,7 +68,7 @@ def test_published_ap_profiles_work_after_relocation(
 
 @pytest.mark.parametrize("concurrent", [1, 2, 4])
 def test_configured_concurrency_and_attempts_reach_harbor(tmp_path, concurrent):
-    from harbor.agents.clawworker_preview.experiment import load_config, make_job
+    from examples.agents.clawworker_preview.experiment import load_config, make_job
 
     profile = tmp_path / "experiment.yaml"
     profile.write_text(
@@ -85,7 +85,7 @@ def test_configured_concurrency_and_attempts_reach_harbor(tmp_path, concurrent):
 
 
 def test_omitted_concurrency_keeps_serial_execution(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 
     config = ExperimentConfig(
         template=tmp_path / "selected.zip",
@@ -100,7 +100,7 @@ def test_omitted_concurrency_keeps_serial_execution(tmp_path):
 
 @pytest.mark.parametrize("invalid", [0, -1, 1.5, True, "2"])
 def test_concurrency_requires_a_positive_integer(invalid):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig
 
     with pytest.raises(ValueError):
         ExperimentConfig(
@@ -112,7 +112,7 @@ def test_concurrency_requires_a_positive_integer(invalid):
 
 
 def test_fixed_cases_use_native_steps_and_stage_only_current_turn_inputs(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
     from harbor.models.task.task import Task
 
     invoice = tmp_path / "invoice.pdf"
@@ -170,7 +170,7 @@ def test_fixed_cases_use_native_steps_and_stage_only_current_turn_inputs(tmp_pat
 
 
 def test_fixed_case_paths_resolve_relative_to_config(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import load_config
+    from examples.agents.clawworker_preview.experiment import load_config
 
     path = tmp_path / "dialogue.yaml"
     path.write_text("""template: template.zip
@@ -207,7 +207,7 @@ cases:
     ],
 )
 def test_fixed_cases_reject_ambiguous_or_invalid_scenarios(extra):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig
 
     with pytest.raises(ValueError):
         ExperimentConfig(
@@ -218,7 +218,7 @@ def test_fixed_cases_reject_ambiguous_or_invalid_scenarios(extra):
 
 
 def test_preview_job_uses_selected_image_model_question_and_inputs(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 
     attachment = tmp_path / "invoice.pdf"
     attachment.write_bytes(b"fixture-pdf")
@@ -240,7 +240,8 @@ def test_preview_job_uses_selected_image_model_question_and_inputs(tmp_path):
     agent = job.agents[0]
     assert agent.name is None
     assert (
-        agent.import_path == "harbor.agents.clawworker_preview.agent:ClawworkerPreview"
+        agent.import_path
+        == "examples.agents.clawworker_preview.agent:ClawworkerPreview"
     )
     assert agent.model_name == "openai/chosen-model"
     assert agent.base_url == "https://model.example/v1"
@@ -269,7 +270,7 @@ def test_preview_job_uses_selected_image_model_question_and_inputs(tmp_path):
 
 @pytest.mark.parametrize("harness", ["hermes", "codex", "claude-code"])
 def test_native_harness_uses_harbor_prompt_and_skills_interfaces(tmp_path, harness):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
     from harbor.utils.templating import render_prompt_template
 
     definition = definition_at(tmp_path)
@@ -292,7 +293,7 @@ def test_native_harness_uses_harbor_prompt_and_skills_interfaces(tmp_path, harne
 
 
 def test_verifier_is_used_only_when_supplied(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 
     definition = definition_at(tmp_path)
     verifier = tmp_path / "check.sh"
@@ -311,7 +312,7 @@ def test_verifier_is_used_only_when_supplied(tmp_path):
 def test_config_paths_are_relative_to_config_not_current_directory(
     tmp_path, monkeypatch
 ):
-    from harbor.agents.clawworker_preview.experiment import load_config
+    from examples.agents.clawworker_preview.experiment import load_config
 
     profile = tmp_path / "profile.json"
     profile.write_text(
@@ -336,7 +337,7 @@ def test_config_paths_are_relative_to_config_not_current_directory(
 
 
 def test_unsupported_harness_fails_before_writing_task(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 
     config = ExperimentConfig(
         template=tmp_path / "package.zip",
@@ -355,7 +356,7 @@ def test_unsupported_harness_fails_before_writing_task(tmp_path):
     [
         {
             "name": "codex",
-            "import_path": "harbor.agents.clawworker_preview.agent:ClawworkerPreview",
+            "import_path": "examples.agents.clawworker_preview.agent:ClawworkerPreview",
         },
         {"name": "clawworker-preview", "import_path": "some.module:AnotherAgent"},
         {"name": "clawworker-preview", "kwargs": {"version": "different-version"}},
@@ -363,14 +364,14 @@ def test_unsupported_harness_fails_before_writing_task(tmp_path):
     ],
 )
 def test_harness_selection_is_never_silently_overridden(agent):
-    from harbor.agents.clawworker_preview.experiment import select_agent
+    from examples.agents.clawworker_preview.experiment import select_agent
 
     with pytest.raises(ValueError):
         select_agent(AgentConfig(**agent))
 
 
 def test_attachment_names_cannot_silently_replace_each_other(tmp_path):
-    from harbor.agents.clawworker_preview.experiment import ExperimentConfig, make_job
+    from examples.agents.clawworker_preview.experiment import ExperimentConfig, make_job
 
     paths = []
     for folder in ("one", "two"):
