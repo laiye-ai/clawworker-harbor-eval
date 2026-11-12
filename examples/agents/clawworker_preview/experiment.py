@@ -20,7 +20,8 @@ from harbor.models.trial.config import AgentConfig, TaskConfig, VerifierConfig
 from harbor.models.trial.result import TrialResult
 
 from . import template_image
-from .report import summarize_trial
+from .report import summarize_simulation, summarize_trial
+from .simulation import SIMULATED_AGENT, UserSimulation
 
 PREVIEW_AGENT = "examples.agents.clawworker_preview.agent:ClawworkerPreview"
 NATIVE_HARNESSES = {"hermes", "codex", "claude-code"}
@@ -50,6 +51,7 @@ class ExperimentConfig(BaseModel):
     attachments: list[Path] = Field(default_factory=list)
     verifier: Path | None = None
     cases: list[CaseConfig] | None = Field(default=None, min_length=1)
+    simulated_user: UserSimulation | None = None
     base_image: str = template_image.BASE_IMAGE
     timeout_sec: float = Field(default=600, gt=0)
     n_attempts: int = Field(default=1, ge=1)
@@ -57,6 +59,15 @@ class ExperimentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_questions(self):
+        if self.simulated_user is not None:
+            if (
+                self.cases is not None
+                or self.question is not None
+                or self.attachments
+                or self.verifier is not None
+            ):
+                raise ValueError("Use simulated_user or fixed questions and cases")
+            return self
         if self.cases is None:
             if self.question is None:
                 raise ValueError("Supply question or cases")
@@ -109,6 +120,20 @@ def load_config(path: Path) -> ExperimentConfig:
             ]
             if turn.verifier is not None:
                 turn.verifier = (parent / turn.verifier.expanduser()).resolve()
+    simulation = config.simulated_user
+    if simulation is not None:
+        simulation.souls = {
+            name: (parent / p.expanduser()).resolve()
+            for name, p in simulation.souls.items()
+        }
+        for scenario in simulation.cases:
+            for task in scenario.tasks:
+                task.attachments = {
+                    alias: (parent / p.expanduser()).resolve()
+                    for alias, p in task.attachments.items()
+                }
+                if task.verifier is not None:
+                    task.verifier = (parent / task.verifier.expanduser()).resolve()
     return config
 
 
@@ -133,6 +158,8 @@ def make_job(
     config: ExperimentConfig, image: str, definition: Path, output: Path
 ) -> JobConfig:
     agent = select_agent(config.agent)
+    if config.simulated_user is not None:
+        return make_simulation_job(config, config.simulated_user, agent, image, output)
     cases = config.conversations()
     for case in cases:
         for turn in case.turns:
@@ -243,11 +270,118 @@ def make_job(
     )
 
 
+def make_simulation_job(
+    config: ExperimentConfig,
+    simulation: UserSimulation,
+    agent: AgentConfig,
+    image: str,
+    output: Path,
+) -> JobConfig:
+    if agent.import_path != PREVIEW_AGENT:
+        raise ValueError("Simulated users require the Clawworker Preview harness")
+    souls = {name: path.read_text() for name, path in simulation.souls.items()}
+    tasks = []
+    for scenario in simulation.cases:
+        case = scenario.model_copy(deep=True)
+        for task in case.tasks:
+            names = [path.name for path in task.attachments.values()]
+            if len(set(names)) != len(names):
+                raise ValueError(f"Task {task.name} has duplicate attachment filenames")
+            for index, (alias, path) in enumerate(task.attachments.items(), start=1):
+                # Use an index for storage. Aliases are user-visible data, not paths.
+                directory = (
+                    output / "simulation-inputs" / case.name / task.name / str(index)
+                )
+                directory.mkdir(parents=True)
+                task.attachments[alias] = Path(
+                    shutil.copyfile(path, directory / path.name)
+                ).resolve()
+                task.attachments[alias].chmod(0o644)
+        for persona, soul in souls.items():
+            name = f"sim-{len(tasks) + 1}-{case.name}"
+            root = output / "tasks" / name
+            environment = root / "environment"
+            environment.mkdir(parents=True)
+            (environment / "Dockerfile").write_text(f"FROM {image}\n")
+            (environment / "docker-compose.yaml").write_text(
+                'services:\n  main:\n    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
+            )
+            (root / "instruction.md").write_text(
+                "Run the configured simulated-user scenario.\n"
+            )
+            (root / "task.toml").write_text(
+                toml.dumps(
+                    {
+                        "schema_version": "1.4",
+                        "task": {"name": "clawworker/" + name, "version": "1.0.0"},
+                        "agent": {
+                            "user": "server",
+                            "timeout_sec": case.max_elapsed_sec + 30,
+                        },
+                        "environment": {
+                            "cpus": 2,
+                            "memory_mb": 4096,
+                            "storage_mb": 10240,
+                            "workdir": "/workspace/work",
+                        },
+                    }
+                )
+            )
+            (root / "simulation.json").write_text(
+                json.dumps(
+                    {
+                        "case": case.model_dump(mode="json"),
+                        "persona": persona,
+                        "soul": soul,
+                        "model": simulation.model_dump(
+                            mode="json", exclude={"souls", "cases"}
+                        ),
+                        "worker_timeout_sec": config.timeout_sec,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            for task in case.tasks:
+                if task.verifier is not None:
+                    tests = root / "steps" / task.name / "tests"
+                    tests.mkdir(parents=True)
+                    shutil.copyfile(task.verifier, tests / "test.sh")
+            tasks.append(TaskConfig(path=root))
+    agent.import_path = SIMULATED_AGENT
+    return JobConfig(
+        job_name="run",
+        jobs_dir=output / "jobs",
+        agents=[agent],
+        tasks=tasks,
+        n_attempts=config.n_attempts,
+        n_concurrent_trials=config.n_concurrent_trials,
+        quiet=True,
+        verifier=VerifierConfig(disable=True),
+    )
+
+
 async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(output)
     agent = select_agent(config.agent)
     AgentFactory.run_preflight(agent)
+    simulation = config.simulated_user
+    if simulation is not None:
+        if agent.import_path != PREVIEW_AGENT:
+            raise ValueError("Simulated users require the Clawworker Preview harness")
+        simulation.api_key()
+        for path in simulation.souls.values():
+            if not path.read_text().strip():
+                raise ValueError("Simulated user SOUL must not be empty")
+        for scenario in simulation.cases:
+            for task in scenario.tasks:
+                paths = list(task.attachments.values())
+                if task.verifier is not None:
+                    paths.append(task.verifier)
+                if any(not path.is_file() for path in paths):
+                    raise ValueError(
+                        f"Missing attachment or verifier for {scenario.name}/{task.name}"
+                    )
     started = time.monotonic()
     output.mkdir(parents=True)
     image = template_image.build(
@@ -257,7 +391,7 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
     job_config = make_job(
         config, image["image"], output / "template-build/definition", output
     )
-    cases = config.conversations()
+    cases = config.conversations() if simulation is None else []
     inputs = []
     for case in cases:
         task = output / "tasks" / case.name if config.cases else output / "task"
@@ -278,12 +412,46 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
                         **({"case": case.name, "turn": name} if config.cases else {}),
                     }
                 )
+    if simulation is not None:
+        for case in simulation.cases:
+            for task in case.tasks:
+                for index, (alias, original) in enumerate(
+                    task.attachments.items(), start=1
+                ):
+                    path = (
+                        output
+                        / "simulation-inputs"
+                        / case.name
+                        / task.name
+                        / str(index)
+                        / original.name
+                    )
+                    inputs.append(
+                        {
+                            "case": case.name,
+                            "task": task.name,
+                            "alias": alias,
+                            "name": path.name,
+                            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        }
+                    )
     (output / "job.json").write_text(job_config.model_dump_json(indent=2))
     job = await Job.create(job_config)
     result = await job.run()
     trials = []
     for path in sorted(job.job_dir.glob("*/result.json")):
         trial = TrialResult.model_validate_json(path.read_text())
+        if simulation is not None:
+            plan = (
+                output
+                / "tasks"
+                / trial.task_name.rsplit("/", 1)[-1]
+                / "simulation.json"
+            )
+            trials.append(
+                summarize_simulation(trial, path, json.loads(plan.read_text()))
+            )
+            continue
         case = next(
             case for case in cases if trial.task_name == "clawworker/" + case.name
         )
@@ -315,7 +483,9 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
         if config.question
         else None,
         "attachments": inputs,
-        "scored": any(t.verifier is not None for c in cases for t in c.turns),
+        "scored": any(t.verifier is not None for c in cases for t in c.turns)
+        if simulation is None
+        else any(t.verifier is not None for c in simulation.cases for t in c.tasks),
         "evaluation": evaluation,
         "build_seconds": build_seconds,
         "elapsed_seconds": time.monotonic() - started,
@@ -323,6 +493,13 @@ async def run_experiment(config: ExperimentConfig, output: Path) -> dict[str, An
         "trials": trials,
         "job_result": str(job.job_dir / "result.json"),
     }
+    if simulation is not None:
+        summary["mode"] = "simulated_user"
+        summary["simulated_user_model"] = simulation.model_name
+        summary["by_persona"] = {
+            persona: [t["name"] for t in trials if t["persona"] == persona]
+            for persona in simulation.souls
+        }
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

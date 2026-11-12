@@ -544,3 +544,111 @@ async def test_failed_turn_check_stops_only_its_case(
     assert summary["evaluation"]["passed"] == 0
     assert summary["evaluation"]["failed"] == 1
     assert summary["evaluation"]["unverified"] == 1
+
+
+@pytest.mark.asyncio
+async def test_simulated_users_repair_in_separate_native_sessions(
+    tmp_path, monkeypatch, preview_model
+):
+    package = tmp_path / "template.zip"
+    package.write_bytes(package_bytes("simulation-worker", "1.0"))
+    (tmp_path / "input.txt").write_text("supplied-document")
+    for persona in ("beginner", "expert"):
+        (tmp_path / f"{persona}.md").write_text(f"ROLE-{persona}")
+    (tmp_path / "verify.sh").write_text(
+        "#!/bin/sh\n"
+        "if grep -qx supplied-document /workspace/work/proof.txt; then reward=1; else reward=0; fi\n"
+        "printf '%s\\n' \"$reward\" > /logs/verifier/reward.txt\n"
+        "echo PRIVATE-VERIFIER-OUTPUT\n"
+    )
+    preview_model.command = (
+        "test ! -e /tests/test.sh && "
+        "if test -f attachments/turn-02/input.txt; then "
+        "cp attachments/turn-02/input.txt proof.txt; fi"
+    )
+
+    def reply(request):
+        if request.get("model") != "simulated-user":
+            return "The Worker replied."
+        assert "PRIVATE-VERIFIER-OUTPUT" not in json.dumps(request)
+        state = json.loads(request["messages"][-1]["content"])
+        history = state["conversation"]
+        if not history:
+            if state["feedback"] is None:
+                return json.dumps(
+                    {
+                        "action": "send",
+                        "message": "Use my file",
+                        "attachments": ["input.txt"],
+                    }
+                )
+            assert '"document"' in state["feedback"]
+            return json.dumps(
+                {"action": "send", "message": "Please check my document."}
+            )
+        if len(history) == 1 and state["feedback"]:
+            assert history[0]["worker"] == "The Worker replied."
+            return json.dumps(
+                {
+                    "action": "send",
+                    "message": "Please try this attachment.",
+                    "attachments": ["document"],
+                }
+            )
+        return json.dumps({"action": "complete"})
+
+    preview_model.reply = reply
+    monkeypatch.setenv("TEST_MODEL_API_KEY", "synthetic-worker-secret")
+    monkeypatch.setenv("SIMULATED_USER_API_KEY", "synthetic-user-secret")
+    profile = tmp_path / "scenario.yaml"
+    profile.write_text(
+        json.dumps(
+            {
+                "template": "template.zip",
+                "agent": {
+                    "name": "clawworker-preview",
+                    "model_name": "openai/test-model",
+                    "base_url": preview_model.base_url,
+                    "model_api_key_name": "TEST_MODEL_API_KEY",
+                },
+                "simulated_user": {
+                    "model_name": "simulated-user",
+                    "base_url": preview_model.base_url.replace(
+                        "host.docker.internal", "127.0.0.1"
+                    ),
+                    "api_key_name": "SIMULATED_USER_API_KEY",
+                    "souls": {"beginner": "beginner.md", "expert": "expert.md"},
+                    "cases": [
+                        {
+                            "name": "missing-document",
+                            "max_turns": 2,
+                            "tasks": [
+                                {
+                                    "name": "verify-document",
+                                    "goal": "Process the document",
+                                    "attachments": {"document": "input.txt"},
+                                    "verifier": "verify.sh",
+                                }
+                            ],
+                        }
+                    ],
+                },
+                "n_concurrent_trials": 2,
+            }
+        )
+    )
+    async with asyncio.timeout(350):
+        summary = await run_experiment(load_config(profile), tmp_path / "output")
+    assert summary["stats"]["n_errored_trials"] == 0, summary["trials"]
+    assert summary["evaluation"]["passed"] == 2, summary["trials"]
+    assert {t["persona"] for t in summary["trials"]} == {"beginner", "expert"}
+    assert len({t["turns"][0]["session_id"] for t in summary["trials"]}) == 2
+    for trial in summary["trials"]:
+        assert trial["tasks"][0]["checks"] == [{"reward": 0}, {"reward": 1}]
+        assert trial["tasks"][0]["repairs"] == 1
+        assert trial["tasks"][0]["attachment_rejections"] == [["input.txt"]]
+        assert [t["attachments"] for t in trial["turns"]] == [[], ["document"]]
+        assert len({t["session_id"] for t in trial["turns"]}) == 1
+        assert trial["simulated_user_totals"]["input_tokens"] == 50
+        assert trial["worker_totals"]["input_tokens"] > 0
+    assert "synthetic-user-secret" not in json.dumps(summary)

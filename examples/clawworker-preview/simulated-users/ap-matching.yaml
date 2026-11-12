@@ -1,0 +1,179 @@
+# Paths resolve relative to this YAML. Read README.md before running.
+base_image: harbor-ap-onboarding:fresh
+template: ./selected-template.zip
+agent:
+  name: clawworker-preview
+  model_name: openai/your-worker-model
+  base_url: https://your-worker-endpoint.example/v1
+  model_api_key_name: MODEL_API_KEY
+  model_api_format: openai_chat_completions
+n_attempts: 1
+n_concurrent_trials: 1
+simulated_user:
+  model_name: your-user-model
+  base_url: https://your-user-endpoint.example/v1
+  api_key_name: SIMULATED_USER_API_KEY
+  souls:
+    beginner: ./souls/beginner.md
+    professional: ./souls/professional.md
+    recovery-expert: ./souls/recovery-expert.md
+  cases:
+    - name: normal-three-way
+      tasks:
+      - &onboarding
+        name: configure-worker
+        goal: Initialize this AP Worker for chat uploads and drafts only. Ask for setup to begin.
+        facts: >-
+          You upload documents in chat, want to handle the ledger in this chat,
+          want accounting drafts only and want every variance reviewed (0%).
+          Answer the question actually shown. If the Worker asks to connect ADP,
+          use the scenario's preconfigured ADP connection and ask it to continue.
+          Request completion verification when the Worker reports that initialization is complete.
+        authorization: Allow setup of the three ADP apps in the test account. Do not approve any financial write or payment.
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_CHECK: onboarding
+      - name: match-complete-set
+        goal: Check whether the invoice, purchase order and delivery note match.
+        facts: Send all three attachments together when requesting the check. You want a draft only.
+        attachments:
+          invoice: ./inputs/three-way/case01/INV-B261105010332-01.pdf
+          po: ./inputs/three-way/case01/PO-B261105010332-01.pdf
+          delivery: ./inputs/three-way/case01/DN-B261105010332-01.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "INV-B261105010332-01"
+          AP_STATUS: MATCHED_PREVIEW_READY
+          AP_PO: "PO-B261105010332-01"
+          AP_DELIVERIES: "DN-B261105010332-01"
+    - name: missing-delivery-recovery
+      tasks:
+      - *onboarding
+      - name: find-missing-delivery
+        goal: Check whether these documents can be matched.
+        facts: Send the invoice and PO together. You do not have the delivery note yet. Finish this task when the Worker tells you which document to obtain.
+        attachments:
+          invoice: ./inputs/three-way/case18/GRA-2610-9209.pdf
+          po: ./inputs/three-way/case18/PO-2610-7109.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "GRA-2610-9209"
+          AP_STATUS: WAITING_DOCUMENTS
+      - name: supply-delivery-and-retry
+        goal: Send the newly obtained delivery note and ask to finish the earlier match.
+        facts: Refer back to the earlier invoice. Send the delivery note and explicitly ask the Worker to continue.
+        attachments:
+          delivery: ./inputs/three-way/case18/DN-2610-8309.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "GRA-2610-9209"
+          AP_STATUS: MATCHED_PREVIEW_READY
+          AP_PO: "PO-2610-7109"
+          AP_DELIVERIES: "DN-2610-8309"
+    - name: supplier-conflict
+      tasks:
+      - *onboarding
+      - name: review-documents
+        goal: Check these three documents and explain anything I need to review.
+        facts: Send all three files. Do not authorize any exception or financial write.
+        attachments:
+          invoice: ./inputs/three-way/case07/SI_7316_42YVA.pdf
+          po: ./inputs/three-way/case07/POWTEHC84.pdf
+          delivery: ./inputs/three-way/case07/DN-385-52318.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "SI/7316/42YVA"
+          AP_STATUS: NEEDS_HUMAN
+          AP_REASON: "supplier|vendor"
+    - name: quantity-shortage
+      tasks:
+      - *onboarding
+      - name: review-documents
+        goal: Check these three documents and explain anything I need to review.
+        facts: Send all three files. Do not authorize any exception or financial write.
+        attachments:
+          invoice: ./inputs/three-way/case12/FIE-2610-9215.pdf
+          po: ./inputs/three-way/case12/PO-2610-7115.pdf
+          delivery: ./inputs/three-way/case12/DN-2610-8315.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "FIE-2610-9215"
+          AP_STATUS: NEEDS_HUMAN
+          AP_REASON: "quantity"
+    - name: product-conflict
+      tasks:
+      - *onboarding
+      - name: review-documents
+        goal: Check these three documents and explain anything I need to review.
+        facts: Send all three files. Do not authorize any exception or financial write.
+        attachments:
+          invoice: ./inputs/three-way/case20/WOO-2610-9218.pdf
+          po: ./inputs/three-way/case20/PO-2610-7118.pdf
+          delivery: ./inputs/three-way/case20/DN-2610-8318.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "WOO-2610-9218"
+          AP_STATUS: NEEDS_HUMAN
+          AP_REASON: "sku|product|item|specification|material"
+    - name: weekly-consolidation
+      max_elapsed_sec: 3600
+      tasks:
+      - *onboarding
+      - name: week-1
+        goal: Match this weekly invoice using the delivery records provided for batch 1.
+        facts: Send all available attachments for this task together. The same purchase agreement is used across weeks. Only include deliveries in the invoice period.
+        attachments:
+          invoice: ./inputs/weekly/发票/HPF-289823.pdf
+          po: ./inputs/weekly/PO/PO_RQ_65494.pdf
+          d01: ./inputs/weekly/供货单/DO_d01_0539702.pdf
+          d02: ./inputs/weekly/供货单/DO_d02_0382153.pdf
+          d03: ./inputs/weekly/供货单/DO_d03_0326648.pdf
+          d04: ./inputs/weekly/供货单/DO_d04_0889155.pdf
+          d05: ./inputs/weekly/供货单/DO_d05_0530986.pdf
+          d06: ./inputs/weekly/供货单/DO_d06_0790417.pdf
+          d07: ./inputs/weekly/供货单/DO_d07_0199432.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "HPF-289823"
+          AP_STATUS: MATCHED_PREVIEW_READY
+          AP_PO: "PO/RQ/65494"
+          AP_DELIVERIES: "0539702,0382153,0326648,0889155,0530986,0790417,0199432"
+      - name: week-2
+        goal: Match this weekly invoice using the delivery records provided for batch 2.
+        facts: Send all available attachments for this task together. The same purchase agreement is used across weeks. Only include deliveries in the invoice period.
+        attachments:
+          invoice: ./inputs/weekly/发票/HPF-253300.pdf
+          d08: ./inputs/weekly/供货单/DO_d08_0174776.pdf
+          d09: ./inputs/weekly/供货单/DO_d09_0238925.pdf
+          d10: ./inputs/weekly/供货单/DO_d10_0253562.pdf
+          d11: ./inputs/weekly/供货单/DO_d11_0660887.pdf
+          d12: ./inputs/weekly/供货单/DO_d12_0503293.pdf
+          d13: ./inputs/weekly/供货单/DO_d13_0352544.pdf
+          d14: ./inputs/weekly/供货单/DO_d14_0959991.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "HPF-253300"
+          AP_STATUS: MATCHED_PREVIEW_READY
+          AP_PO: "PO/RQ/65494"
+          AP_DELIVERIES: "0174776,0238925,0253562,0660887,0503293,0352544,0959991"
+      - name: week-3
+        goal: Match this weekly invoice using the delivery records provided for batch 3.
+        facts: Send all available attachments for this task together. The same purchase agreement is used across weeks. Only include deliveries in the invoice period.
+        attachments:
+          invoice: ./inputs/weekly/发票/HPF-205427.pdf
+          d15: ./inputs/weekly/供货单/DO_d15_0289228.pdf
+          d16: ./inputs/weekly/供货单/DO_d16_0871036.pdf
+          d17: ./inputs/weekly/供货单/DO_d17_0849527.pdf
+          d18: ./inputs/weekly/供货单/DO_d18_0212747.pdf
+          d19: ./inputs/weekly/供货单/DO_d19_0909485.pdf
+          d20: ./inputs/weekly/供货单/DO_d20_0110317.pdf
+          d21: ./inputs/weekly/供货单/DO_d21_0928143.pdf
+          d22: ./inputs/weekly/供货单/DO_d22_0582563.pdf
+          d23: ./inputs/weekly/供货单/DO_d23_0442511.pdf
+        verifier: ./checks/verify-ap.sh
+        verifier_env:
+          AP_INVOICE: "HPF-205427"
+          AP_STATUS: MATCHED_PREVIEW_READY
+          AP_PO: "PO/RQ/65494"
+          AP_DELIVERIES: "0289228,0871036,0849527,0212747,0909485,0110317,0928143"
+          AP_UNSETTLED_DELIVERIES: "0582563,0442511"

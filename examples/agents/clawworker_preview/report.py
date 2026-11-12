@@ -131,3 +131,102 @@ def summarize_trial(
         "turns": reports,
         "result": str(path),
     }
+
+
+def summarize_simulation(
+    trial: TrialResult, path: Path, plan: dict[str, Any]
+) -> dict[str, Any]:
+    report_path = path.parent / "simulation/report.json"
+    report: dict[str, Any] = (
+        json.loads(report_path.read_text())
+        if report_path.is_file()
+        else {
+            "tasks": [
+                {
+                    "name": task["name"],
+                    "status": "not_run",
+                    "checks": [],
+                    "repairs": 0,
+                    "turn_count": 0,
+                }
+                for task in plan["case"]["tasks"]
+            ],
+            "turns": [],
+            "stop_reason": "not_started",
+            "simulated_user_requests": [],
+        }
+    )
+    for task in report["tasks"]:
+        checks = task["checks"]
+        task["first_verification"] = checks[0] if checks else None
+        task["final_verification"] = checks[-1] if checks else None
+    complete = report["stop_reason"] == "completed" and trial.exception_info is None
+    scored = any(task["verifier"] is not None for task in plan["case"]["tasks"])
+    status = "passed" if scored else "unverified"
+    if any(task["status"] == "failed" for task in report["tasks"]):
+        status = "failed"
+    elif not complete:
+        status = "incomplete"
+
+    def totals(requests: list[dict[str, Any]] | None) -> dict[str, Any]:
+        if requests is None:
+            return {
+                "requests": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "duration_seconds": None,
+            }
+        inputs = [(item.get("usage") or {}).get("input_tokens") for item in requests]
+        outputs = [(item.get("usage") or {}).get("output_tokens") for item in requests]
+        durations = [item.get("duration_seconds") for item in requests]
+        return {
+            "requests": len(requests),
+            "input_tokens": sum(inputs)
+            if all(value is not None for value in inputs)
+            else None,
+            "output_tokens": sum(outputs)
+            if all(value is not None for value in outputs)
+            else None,
+            "duration_seconds": sum(durations)
+            if all(value is not None for value in durations)
+            else None,
+        }
+
+    def worker_totals(turns: list[dict[str, Any]]) -> dict[str, Any]:
+        groups = [turn.get("worker_model_requests") for turn in turns]
+        return totals(
+            [request for group in groups if group is not None for request in group]
+            if all(group is not None for group in groups)
+            else None
+        )
+
+    for task in report["tasks"]:
+        task["worker_totals"] = worker_totals(
+            [turn for turn in report["turns"] if turn["task"] == task["name"]]
+        )
+        task["simulated_user_totals"] = totals(
+            [
+                request
+                for request in report["simulated_user_requests"]
+                if request["task"] == task["name"]
+            ]
+        )
+
+    return {
+        **report,
+        "name": trial.trial_name,
+        "case": plan["case"]["name"],
+        "persona": plan["persona"],
+        "turn_count": sum(
+            turn["runtime_status"] == "completed" for turn in report["turns"]
+        ),
+        "execution_complete": complete,
+        "scored": scored,
+        "verification_status": status,
+        "worker_totals": worker_totals(report["turns"]),
+        "simulated_user_totals": totals(report["simulated_user_requests"]),
+        "exception": trial.exception_info.model_dump(mode="json")
+        if trial.exception_info
+        else None,
+        "result": str(path),
+    }

@@ -238,3 +238,11 @@ python -m pytest tests/runtime/test_clawworker_preview.py tests/runtime/test_cla
 ```
 
 The runtime test starts a temporary model protocol fixture on the host and supplies synthetic model/ADP keys. Harbor creates and removes its own trial container; the verifier checks the file written by the real Hermes terminal tool. No external model, live ADP request or cloud deployment is used.
+
+## Simulated users
+
+The [simulated-user profiles](simulated-users/README.md) run the same task with
+one or more user SOULs. The user model reacts to the Worker's visible replies,
+can send scenario attachments, and can attempt to recover a failed task. Each
+role gets its own session, and the report separates model calls and token usage
+for the user and the Worker.
